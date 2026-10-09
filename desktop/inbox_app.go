@@ -316,9 +316,7 @@ func (a *App) enqueueInbox(tabID string, intent sessioninbox.InboxIntent, displa
 }
 
 func (a *App) enqueueInboxWithController(tabID string, ctrl control.SessionAPI, intent sessioninbox.InboxIntent, display, submit string, invocations []InvocationRequest, idempotency string, trySteer bool, turnID, expectedPath string) (InboxReceiptView, error) {
-	if ensurer, ok := ctrl.(interface{ EnsureSessionPath() }); ok {
-		ensurer.EnsureSessionPath()
-	}
+	a.ensureFirstSessionPath(tabID, ctrl)
 	submit = strings.TrimSpace(submit)
 	display = strings.TrimSpace(display)
 	if submit == "" && len(invocations) == 0 {

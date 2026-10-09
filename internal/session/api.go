@@ -62,6 +62,10 @@ type SessionKind string
 // resumable, but it is not a conversation a sidebar should offer.
 const SessionKindHeadlessRun SessionKind = "headless-run"
 
+// SessionKindSideChat marks a read-only companion session owned by another
+// conversation. It stays resumable, but a sidebar must not offer it.
+const SessionKindSideChat SessionKind = "side-chat"
+
 type CreateOptions struct {
 	SessionID       string
 	CWD             string
@@ -176,7 +180,7 @@ func (p *FilesystemPersistence) Create(options CreateOptions) (*Session, error) 
 		return nil, err
 	}
 	options.SessionID = id
-	if options.Kind != "" && options.Kind != SessionKindHeadlessRun {
+	if options.Kind != "" && options.Kind != SessionKindHeadlessRun && options.Kind != SessionKindSideChat {
 		return nil, fmt.Errorf("session: unsupported session kind %q", options.Kind)
 	}
 	header, err := headerForCreate(options)

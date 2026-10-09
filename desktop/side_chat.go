@@ -142,3 +142,24 @@ func sideChatSessionTarget(tab *WorkspaceTab) (session.SessionRef, *session.Serv
 	}
 	return ref, identity.SessionService()
 }
+
+// ensureFirstSessionPath creates a tab's first session store. A companion
+// session records its kind, so conversation lists leave it out.
+func (a *App) ensureFirstSessionPath(tabID string, ctrl control.SessionAPI) {
+	if a.tabIsSideChat(tabID) {
+		if ensurer, ok := ctrl.(interface{ EnsureSideChatSessionPath() }); ok {
+			ensurer.EnsureSideChatSessionPath()
+		}
+		return
+	}
+	if ensurer, ok := ctrl.(interface{ EnsureSessionPath() }); ok {
+		ensurer.EnsureSessionPath()
+	}
+}
+
+func (a *App) tabIsSideChat(tabID string) bool {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	tab := a.tabs[tabID]
+	return tab != nil && tab.SideChat.Enabled
+}
