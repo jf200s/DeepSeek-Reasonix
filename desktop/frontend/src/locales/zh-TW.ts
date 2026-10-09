@@ -381,6 +381,7 @@ export const zhTW: Record<DictKey, string> = {
   "rightDock.browser": "瀏覽器",
   "rightDock.remote": "遠端",
   "rightDock.terminal": "終端機",
+  "sideChat.title": "輔助對話",
   "rightDock.launcher": "開啟工作區面板",
   "rightDock.launcherTitle": "工作區",
   "rightDock.showLauncher": "展開工作區浮層",

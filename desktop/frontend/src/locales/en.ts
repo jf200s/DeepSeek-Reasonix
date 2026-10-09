@@ -426,6 +426,7 @@ export const en = {
   "rightDock.browser": "Browser",
   "rightDock.remote": "Remote",
   "rightDock.terminal": "Terminal",
+  "sideChat.title": "Side conversation",
   "rightDock.launcher": "Open workspace panel",
   "rightDock.launcherTitle": "Workspace",
   "rightDock.showLauncher": "Show workspace menu",

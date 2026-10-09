@@ -427,6 +427,7 @@ export const zh: Record<DictKey, string> = {
   "rightDock.browser": "浏览器",
   "rightDock.remote": "远程",
   "rightDock.terminal": "终端",
+  "sideChat.title": "辅助对话",
   "rightDock.launcher": "打开工作区面板",
   "rightDock.launcherTitle": "工作区",
   "rightDock.showLauncher": "展开工作区浮层",

@@ -70,6 +70,13 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   const projectReady = loadedRoot === (props.workspaceRoot ?? props.workspace.cwd ?? "");
   const requests = useDockViewRequests(`${props.workspaceKey}::${props.workspace.tabId ?? ""}`, visible && projectReady ? activeTabId : null, props.workspace, props.navigation, tabs.map(tab => tab.id));
 
+  // A companion session needs a host round-trip before its dock tab can exist,
+  // so the opener is loaded on demand and this region keeps the host bridge out
+  // of its own import graph.
+  const openSideChat = (title: string) => {
+    void import("../lib/sideChatOpen").then((module) => module.openSideChatTab(props.workspace.tabId ?? "", title));
+  };
+
   const renderTab = (tab: TabItem): ReactNode => {
     if (!projectReady) return null;
     if (firstFileTabId) readWorkspaceTreeMemory(workspaceViewMemoryKey(props.workspaceKey, firstFileTabId, true));
@@ -129,7 +136,7 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
         <aside className={["workbench-dock", `workbench-dock--${mode}`, overlay ? "workbench-dock--overlay" : ""].join(" ")} aria-label={t("rightDock.workbench")}>
           <div className="workbench-dock__panel">
             <Suspense fallback={null}>
-              <TabContainer key={loadedRoot} renderTab={renderTab} onPickEntry={props.onPickEntry} onClosePanel={props.workspace.onClose} />
+              <TabContainer key={loadedRoot} renderTab={renderTab} onPickEntry={props.onPickEntry} onPickSideChat={openSideChat} onClosePanel={props.workspace.onClose} />
             </Suspense>
           </div>
         </aside>
