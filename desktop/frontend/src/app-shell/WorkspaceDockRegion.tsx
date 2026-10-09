@@ -17,6 +17,10 @@ const TabContainer = lazy(() => import("../components/TabContainer/TabContainer"
 const ContextPanel = lazy(() => import("../components/ContextPanel").then((module) => ({ default: module.ContextPanel })));
 const RemotePanel = lazy(() => import("../components/RemotePanel").then((module) => ({ default: module.RemotePanel })));
 const BrowserSurface = lazy(() => import("../components/BrowserPanelEntry"));
+// The companion panel pulls the transcript and the composer, so it stays out of
+// the initial bundle until a side-chat tab is actually opened.
+const SideChatPanel = lazy(() =>
+  import("../components/SideChatPanel").then((module) => ({ default: module.SideChatPanel })));
 const WorkspacePanel = lazy(async () => {
   const [module] = await Promise.all([
     import("../components/WorkspacePanel"),
@@ -79,6 +83,21 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
         return <RemotePanel key={`${props.workspaceKey}::${props.workspace.tabId}::${tab.id}`} {...props.remote} tabId={props.workspace.tabId} dockTabId={tab.id} fileNavigation={fileNavigation} navigationSignal={requests.navigationSignal} />;
       case "browser":
         return <BrowserSurface surface="panel" taskId={props.workspace.tabId} />;
+      case "sideChat": {
+        // A companion session has no dock panel mode: it renders its own child
+        // session, so a tab without a child id is not renderable.
+        const childTabId = typeof tab.meta?.childTabId === "string" ? tab.meta.childTabId : "";
+        const parentTabId = typeof tab.meta?.parentTabId === "string" ? tab.meta.parentTabId : "";
+        if (!childTabId) return null;
+        return (
+          <SideChatPanel
+            key={`${props.workspaceKey}::${tab.id}`}
+            tabId={childTabId}
+            parentTabId={parentTabId}
+            cwd={props.workspace.cwd}
+          />
+        );
+      }
       default:
         return (
           <WorkspacePanel
