@@ -120,6 +120,10 @@ type Options struct {
 	// --allowed-tools). They override configured ask rules but never deny rules
 	// and are not persisted.
 	PermissionAllow []string
+	// ReadOnlySession builds this controller with the read-only tool set:
+	// research tools plus the read-only shell wrapper, minus writer and
+	// workflow/meta tools. Desktop uses it for side-chat sessions.
+	ReadOnlySession bool
 	// AdditionalDirs grants this session's file writers and sandboxed shell
 	// access to extra directories without changing persisted sandbox config.
 	AdditionalDirs []string
@@ -1687,6 +1691,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		_, missing := catalog.RequiresReady(requires)
 		return missing
 	})
+
+	reg = readOnlySessionRegistry(reg, opts.ReadOnlySession)
 
 	execSess := newObservedSession(sysPrompt)
 	executor := agent.New(execProv, reg, execSess, agent.Options{
