@@ -29,7 +29,12 @@ function dockModeForTab(type: TabType): RightDockMode {
     case "changed": return "changed";
     case "remote": return "remote";
     case "browser": return "browser";
-    default: return "files";
+    // A side chat has no panel mode of its own: it shares the dock column with
+    // the file surfaces, so the legacy geometry readers keep the files shape.
+    case "sideChat":
+    case "file":
+    default:
+      return "files";
   }
 }
 
@@ -48,6 +53,9 @@ function tabForDockMode(mode: RightDockMode): TabType {
 function labelKeyForTab(type: TabType): string {
   if (type === "remote") return "rightDock.remote";
   if (type === "browser") return "rightDock.browser";
+  // A side chat has no launcher entry either — it is opened from a parent
+  // session, so its title is the translated label plus the companion ordinal.
+  if (type === "sideChat") return "sideChat.title";
   return DOCK_ENTRIES.find(entry => entry.defaultTab === type)?.labelKey ?? "workspace.filesTab";
 }
 
