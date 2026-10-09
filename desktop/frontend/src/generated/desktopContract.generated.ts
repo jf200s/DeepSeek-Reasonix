@@ -3,7 +3,7 @@
 
 export const DESKTOP_PROTOCOL_VERSION = 11;
 
-export const DESKTOP_CONTRACT_DIGEST = "sha256:210f66b66e33ec4c371de07c74cfd69d22a831b23cbf6ef5dd44f2b156689241";
+export const DESKTOP_CONTRACT_DIGEST = "sha256:9fbb99bdc0e7b8e8de95ac391a20d9ff79ec63e9e7114ea9a57e30ad96d70742";
 
 export const DESKTOP_COMMANDS = [
   "AIRenameSession",
@@ -108,6 +108,7 @@ export const DESKTOP_COMMANDS = [
   "CloseMainWindow",
   "CloseMergedWorktreeTab",
   "CloseRemoteTab",
+  "CloseSideChatTab",
   "CloseTab",
   "CloseTabWithPolicy",
   "CloseTerminalForTab",
@@ -351,6 +352,7 @@ export const DESKTOP_COMMANDS = [
   "OpenSession",
   "OpenSessionDraft",
   "OpenSessionDraftForTarget",
+  "OpenSideChatForTab",
   "OpenTaskSessionByKey",
   "OpenTaskSessionForTab",
   "OpenTopicSession",
@@ -4541,6 +4543,12 @@ export interface ShellInstallResult {
   manualUrl?: string;
 }
 
+export interface SideChatOpenResult {
+  TabID: string;
+  SessionID: string;
+  Ordinal: number;
+}
+
 export interface SkillRootSkillView {
   name: string;
   description: string;
@@ -4657,6 +4665,8 @@ export interface TabMeta {
   sessionDigest?: string;
   sessionGeneration?: number;
   readOnly?: boolean;
+  sideChat?: boolean;
+  parentTabId?: string;
   takenOver?: boolean;
   projectColor?: string;
   label: string;
@@ -6041,6 +6051,7 @@ export interface GeneratedDesktopCommands {
   CloseMainWindow(): Promise<void>;
   CloseMergedWorktreeTab(arg0: CloseMergedWorktreeTabRequest): Promise<CloseMergedWorktreeTabResult>;
   CloseRemoteTab(arg0: string): Promise<void>;
+  CloseSideChatTab(arg0: string): Promise<void>;
   CloseTab(arg0: string): Promise<void>;
   CloseTabWithPolicy(arg0: string, arg1: string): Promise<void>;
   CloseTerminalForTab(arg0: string, arg1: string): Promise<void>;
@@ -6284,6 +6295,7 @@ export interface GeneratedDesktopCommands {
   OpenSession(arg0: SessionRef): Promise<HistoryPage>;
   OpenSessionDraft(arg0: string): Promise<SessionDraftView>;
   OpenSessionDraftForTarget(arg0: string, arg1: string): Promise<SessionDraftView>;
+  OpenSideChatForTab(arg0: string): Promise<SideChatOpenResult>;
   OpenTaskSessionByKey(arg0: TaskOpenRequest): Promise<ControlResult>;
   OpenTaskSessionForTab(arg0: string, arg1: string): Promise<ControlResult>;
   OpenTopicSession(arg0: string, arg1: string, arg2: string, arg3: string): Promise<TabMeta>;
