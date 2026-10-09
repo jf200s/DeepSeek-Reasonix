@@ -101,6 +101,7 @@ type WorkspaceTab struct {
 	SideChat struct {
 		Enabled  bool
 		ParentID string
+		Ordinal  int
 	}
 	Takeover            struct{ Spectator bool } // handoff state grouped by its cross-runtime lifetime
 	Ctrl                control.SessionAPI       // nil while booting / on error
@@ -3117,6 +3118,7 @@ func (a *App) ReorderTabs(tabIDs []string) error {
 // background work, the controller is detached so closing a view does not destroy
 // the session runtime.
 func (a *App) CloseTab(tabID string) error {
+	a.closeSideChatChildren(tabID)
 	return a.closeTab(tabID, true)
 }
 
