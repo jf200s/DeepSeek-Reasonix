@@ -34,6 +34,7 @@ func (a *App) sessionOpenBootOptions(
 	return boot.Options{
 		Model:                    model,
 		RequireKey:               false,
+		ReadOnlySession:          tab.SideChat.Enabled,
 		StatsSource:              "desktop",
 		TaskStore:                a.taskStore(),
 		OnConfigLoadWarnings:     a.configLoadWarningsHandler(),

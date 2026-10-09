@@ -96,21 +96,27 @@ type WorkspaceTab struct {
 	persistenceExtra         map[string]json.RawMessage // unknown desktop-tabs.json fields retained across rewrites
 	SessionGeneration        uint64                     // bumps on session rotation (clear/new); frontend hydrate identity
 	ReadOnly                 bool                       // true for external channel transcripts opened for browsing
-	Takeover                 struct{ Spectator bool }   // handoff state grouped by its cross-runtime lifetime
-	Ctrl                     control.SessionAPI         // nil while booting / on error
-	Label                    string                     // model label (for the tab badge)
-	Ready                    bool                       // true once boot.Build completes
-	StartupErr               string                     // build error, surfaced to the frontend
-	HistoricalSource         *SessionSourceRef          // immutable, pending explicit preparation after restore
-	StartupErrLeaseHeld      bool                       // true when StartupErr can be retried after a session lease releases
-	modelApplication         tabModelApplicationState   // guarded by App.mu; never persisted
-	runtimeID                string                     // process-local SessionRuntime registry identity
-	sessionLease             *agent.SessionLease
-	sessionLeaseMu           sync.Mutex
-	sessionLeaseKey          atomic.Pointer[string] // lock-free mirror; updated with sessionLease under sessionLeaseMu
-	sink                     *tabEventSink          // routes events with this tab's ID
-	buildCancel              context.CancelFunc     // cancels in-flight boot for tabs removed before Ready
-	buildGeneration          uint64                 // identifies the current in-flight build
+	// SideChat groups the companion-session facts: a side-chat tab is a
+	// process-local, read-only session owned by another tab.
+	SideChat struct {
+		Enabled  bool
+		ParentID string
+	}
+	Takeover            struct{ Spectator bool } // handoff state grouped by its cross-runtime lifetime
+	Ctrl                control.SessionAPI       // nil while booting / on error
+	Label               string                   // model label (for the tab badge)
+	Ready               bool                     // true once boot.Build completes
+	StartupErr          string                   // build error, surfaced to the frontend
+	HistoricalSource    *SessionSourceRef        // immutable, pending explicit preparation after restore
+	StartupErrLeaseHeld bool                     // true when StartupErr can be retried after a session lease releases
+	modelApplication    tabModelApplicationState // guarded by App.mu; never persisted
+	runtimeID           string                   // process-local SessionRuntime registry identity
+	sessionLease        *agent.SessionLease
+	sessionLeaseMu      sync.Mutex
+	sessionLeaseKey     atomic.Pointer[string] // lock-free mirror; updated with sessionLease under sessionLeaseMu
+	sink                *tabEventSink          // routes events with this tab's ID
+	buildCancel         context.CancelFunc     // cancels in-flight boot for tabs removed before Ready
+	buildGeneration     uint64                 // identifies the current in-flight build
 	// buildDone is closed exactly once when the build that owns buildDoneGen
 	// terminates (success, failure, or superseded abandon). Topic-activation
 	// completions wait on it to learn that the controller build finished
@@ -2172,6 +2178,8 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		SessionDigest:     sessionDigest,
 		SessionGeneration: tab.SessionGeneration,
 		ReadOnly:          tab.ReadOnly,
+		SideChat:          tab.SideChat.Enabled,
+		ParentTabID:       tab.SideChat.ParentID,
 		TakenOver:         tab.Takeover.Spectator,
 		Label:             tab.Label,
 		Ready:             runtimeView.Phase == sessionRuntimeReady && tab.Ctrl != nil,
@@ -4767,7 +4775,7 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 	var entries []desktopTabEntry
 	for _, id := range a.orderedTabIDsLocked() {
 		if tab := a.tabs[id]; tab != nil {
-			if a.suppressTabStartupRestoreLocked(tab) {
+			if a.suppressTabStartupRestoreLocked(tab) || tab.SideChat.Enabled {
 				continue
 			}
 			entries = append(entries, persistedDesktopTabEntry(tab))
