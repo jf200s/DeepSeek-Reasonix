@@ -109,6 +109,14 @@ func (a *App) CloseSideChatTab(tabID string) error {
 			return err
 		}
 	}
+	return a.deleteSideChatSession(tabID, service, ref)
+}
+
+// deleteSideChatSession removes a companion's throwaway session. It is split out
+// of CloseSideChatTab so the deletion path can run against a real session
+// service: driving the whole close needs a booted controller, and an uncovered
+// delete is exactly the leak shape the warn below exists to surface.
+func (a *App) deleteSideChatSession(tabID string, service *session.Service, ref session.SessionRef) error {
 	if service == nil {
 		// No exclusive session to delete; warn so a silent leak stays visible.
 		slog.Warn("desktop: side chat closed with no session to delete", "tab", tabID)
