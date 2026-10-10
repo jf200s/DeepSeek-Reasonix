@@ -6,10 +6,13 @@ package boot
 
 import (
 	"context"
+	"encoding/json"
+	"strings"
 	"testing"
 
 	"reasonix/internal/agent/testutil"
 	"reasonix/internal/event"
+	"reasonix/internal/tool"
 )
 
 // TestBuildReadOnlySessionStripsWriterTools pins the read-only session surface:
@@ -112,5 +115,97 @@ model = "x"
 	shellName := platformShellToolName()
 	if requestToolDescriptionContains(req, shellName, "Only permission-classified read-only commands are allowed") {
 		t.Fatalf("a writable session must not use the read-only %s wrapper; got %q", shellName, requestToolDescription(req, shellName))
+	}
+}
+
+// readOnlySessionProbeShell stands in for the built-in shell: it accepts every
+// command, so a refusal can only have come from the read-only wrapper.
+type readOnlySessionProbeShell struct{ name string }
+
+func (s readOnlySessionProbeShell) Name() string { return s.name }
+
+func (readOnlySessionProbeShell) Description() string {
+	return "Execute a command in the shell and return combined stdout/stderr."
+}
+
+func (readOnlySessionProbeShell) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{"command":{"type":"string"}},"required":["command"]}`)
+}
+
+func (readOnlySessionProbeShell) ReadOnly() bool { return false }
+
+func (readOnlySessionProbeShell) Execute(context.Context, json.RawMessage) (string, error) {
+	return "ran", nil
+}
+
+// readOnlySessionProbeWriter is the writer the probe expects the read-only
+// registry to drop.
+type readOnlySessionProbeWriter struct{}
+
+func (readOnlySessionProbeWriter) Name() string        { return "write_file" }
+func (readOnlySessionProbeWriter) Description() string { return "Write a file." }
+func (readOnlySessionProbeWriter) Schema() json.RawMessage {
+	return json.RawMessage(`{"type":"object","properties":{}}`)
+}
+func (readOnlySessionProbeWriter) ReadOnly() bool { return false }
+func (readOnlySessionProbeWriter) Execute(context.Context, json.RawMessage) (string, error) {
+	return "wrote", nil
+}
+
+// TestReadOnlySessionRefusesWriteCommandsAtExecutionTime pins the other half of
+// the read-only surface. TestBuildReadOnlySessionStripsWriterTools shows what the
+// provider may call, but a hidden tool is not the same guarantee as a refused
+// call: this drives the shell the read-only session installs with a write
+// command and requires the host to refuse it.
+func TestReadOnlySessionRefusesWriteCommandsAtExecutionTime(t *testing.T) {
+	reg := tool.NewRegistry()
+	shellName := platformShellToolName()
+	reg.Add(readOnlySessionProbeShell{name: shellName})
+	reg.Add(readOnlySessionProbeWriter{})
+
+	shell, ok := readOnlySessionRegistry(reg, true).Get(shellName)
+	if !ok {
+		t.Fatalf("read-only session registry must keep the shell; got %v", readOnlySessionRegistry(reg, true).Names())
+	}
+	if !shell.ReadOnly() {
+		t.Fatal("the read-only session shell must report ReadOnly")
+	}
+	if _, ok := readOnlySessionRegistry(reg, true).Get("write_file"); ok {
+		t.Fatal("read-only session registry must drop write_file")
+	}
+
+	if out, err := shell.Execute(context.Background(), json.RawMessage(`{"command":"git status"}`)); err != nil || out != "ran" {
+		t.Fatalf("a read-only command must reach the shell: out=%q err=%v", out, err)
+	}
+
+	for _, command := range []string{
+		`Set-Content -Path probe.txt -Value x`,
+		`echo x > probe.txt`,
+		`rm -rf probe`,
+	} {
+		args, err := json.Marshal(map[string]string{"command": command})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, execErr := shell.Execute(context.Background(), args)
+		if msg, blocked := tool.BlockedMessage(execErr); !blocked || !strings.HasPrefix(msg, "blocked:") {
+			t.Fatalf("write command %q must be refused at execution time; out=%q err=%v", command, out, execErr)
+		} else if out != "" {
+			t.Fatalf("refused command %q must not also return output; got %q", command, out)
+		}
+	}
+
+	// Control: without the flag the same registry leaves the shell unwrapped, so
+	// the refusals above come from the read-only boundary and not from the probe.
+	plain, ok := readOnlySessionRegistry(reg, false).Get(shellName)
+	if !ok {
+		t.Fatalf("writable registry must keep the shell; got %v", readOnlySessionRegistry(reg, false).Names())
+	}
+	args, err := json.Marshal(map[string]string{"command": `Set-Content -Path probe.txt -Value x`})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out, err := plain.Execute(context.Background(), args); err != nil || out != "ran" {
+		t.Fatalf("a writable session must not wrap the shell: out=%q err=%v", out, err)
 	}
 }

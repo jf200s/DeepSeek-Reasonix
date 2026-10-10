@@ -1692,6 +1692,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		return missing
 	})
 
+	// ReadOnlyExecution gives the same boundary at execution time.
 	reg = readOnlySessionRegistry(reg, opts.ReadOnlySession)
 
 	execSess := newObservedSession(sysPrompt)
@@ -1716,6 +1717,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		HomeDir:                      userHomeDir(),
 		StateRoot:                    config.MemoryUserDir(),
 		Ablation:                     opts.Ablation,
+		ReadOnlyExecution:            opts.ReadOnlySession,
 		WorkspaceLease:               workspaceLease,
 		CapabilityLedger:             capLedger,
 		CapabilityAudit:              capAudit,
