@@ -175,6 +175,12 @@ export function ChatPaneRegion(props: ChatPaneRegionProps) {
                 geometrySessionKey={transcript.geometrySessionKey}
                 footerHeight={transcript.footerHeight}
                 onPrompt={commands.onPrompt}
+                onAskInSideChat={transcript.readOnly ? undefined : (text) => {
+                  // The opener owns the host round-trip, so it is imported on
+                  // demand: the chat pane stays out of the bridge's import graph.
+                  const parentTabId = transcript.tabId ?? "";
+                  void import("../lib/sideChatOpen").then((module) => module.askInSideChat(parentTabId, text, t("sideChat.title")));
+                }}
                 onFork={commands.onFork}
                 onOpenTurnChanges={commands.onOpenTurnChanges}
                 forkTargets={state.forkTargets}

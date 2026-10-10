@@ -9,6 +9,7 @@ import { Transcript } from "./Transcript";
 import "./SideChatPanel.css";
 import { app } from "../lib/bridge";
 import { getTranscriptStore } from "../lib/transcriptStore";
+import { subscribeSideChatDraft, takeSideChatDraft, type SideChatDraft } from "../lib/sideChatDraft";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
 import { initialState, type Item, type State } from "../lib/useController";
 
@@ -128,6 +129,16 @@ export const SideChatPanel = memo(function SideChatPanel({
   // unhandledrejection and raise the shell's crash overlay over the whole
   // window, which is why a refused send looked like "nothing happens". The
   // companion reports the refusal in place instead, like the main area does.
+  // The transcript's selection action hands its text here instead of submitting
+  // it: the companion composer starts from the quoted selection and the user
+  // finishes the question. A draft deposited before this panel mounted is taken
+  // on mount; one deposited while it is open arrives by subscription.
+  const [askDraft, setAskDraft] = useState<SideChatDraft | null>(null);
+  useEffect(() => {
+    setAskDraft(takeSideChatDraft(tabId));
+    return subscribeSideChatDraft(tabId, setAskDraft);
+  }, [tabId]);
+
   const [hostError, setHostError] = useState<string | null>(null);
   const runHost = (call: Promise<unknown>) => {
     call.catch((error) => setHostError(error instanceof Error ? error.message : String(error)));
@@ -202,6 +213,9 @@ export const SideChatPanel = memo(function SideChatPanel({
         // The companion is read-only through its tool set, not through a muted
         // composer: the user still has to ask the question.
         readOnly={false}
+        // A selection handed over by the transcript action starts the question
+        // here; the user sends it once it says what they meant to ask.
+        selectedTextRequest={askDraft}
         onSend={(displayText, submitText) => {
           const input = submitText ?? displayText;
           if (!input.trim()) return;
