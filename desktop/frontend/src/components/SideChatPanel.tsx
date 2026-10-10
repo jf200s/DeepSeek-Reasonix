@@ -258,6 +258,12 @@ export const SideChatPanel = memo(function SideChatPanel({
           runHost(app.CancelTab(tabId));
           return { discardedItemIds: [] };
         }}
+        // A companion is read-only and ephemeral: it has no task mode, approval
+        // mode, goal or queue to change, and the host implements no model or
+        // effort switch for it. hostControls={false} keeps those controls out of
+        // the composer, so the callbacks below stay the inert values the props
+        // require instead of buttons that look live and do nothing.
+        hostControls={false}
         onCycleMode={() => {}}
         onSetMode={() => {}}
         onSetCollaborationMode={() => {}}

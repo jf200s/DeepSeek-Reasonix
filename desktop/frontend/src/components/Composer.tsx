@@ -554,6 +554,7 @@ export function Composer({
   guidanceQueuePreviewItems,
   showContextWindowRing = false,
   heroMode = false,
+  hostControls = true,
   context,
   turnCost,
   turnRateBand,
@@ -682,6 +683,10 @@ export function Composer({
   // Creation empty-session hero: slim centered composer under the welcome
   // headline (hides task/approval chrome; keeps model + effort).
   heroMode?: boolean;
+  // A surface hosting the composer for a read-only, ephemeral child session
+  // implements none of these controls: hostControls={false} drops the model
+  // switcher, approval mode and effort, and keeps the reporting context ring.
+  hostControls?: boolean;
   context?: ContextInfo;
   turnCost?: number;
   turnRateBand?: string;
@@ -4783,7 +4788,7 @@ export function Composer({
                 </Tooltip>
               </div>
             )}
-            {!heroMode && <div className="composer-meta__control composer-meta__control--approval">
+            {!heroMode && hostControls && <div className="composer-meta__control composer-meta__control--approval">
               <PermissionPresetChoice
                 key={`approval-${tabId}`}
                 value={permissionPreset}
@@ -4826,11 +4831,11 @@ export function Composer({
                   balance={balance} dismissSignal={transientDismissSignal}
                 />
               )}
-              <Suspense fallback={<span className="modelsw__label">{modelLabel}</span>}><ModelSwitcher composerMenu label={modelLabel} tabId={tabId} draftId={bridgeTarget.kind === "draft" ? bridgeTarget.draftId : undefined} ready={ready} sessionKey={sessionKey} disabled={disabled || suspendedByDecision} dismissSignal={transientDismissSignal} onPick={onSwitchModel} onManage={() => {
+              {hostControls && <Suspense fallback={<span className="modelsw__label">{modelLabel}</span>}><ModelSwitcher composerMenu label={modelLabel} tabId={tabId} draftId={bridgeTarget.kind === "draft" ? bridgeTarget.draftId : undefined} ready={ready} sessionKey={sessionKey} disabled={disabled || suspendedByDecision} dismissSignal={transientDismissSignal} onPick={onSwitchModel} onManage={() => {
                 useAppNavigationStore.getState().setSettingsFocus({ target: "model-access" });
                 useAppNavigationStore.getState().setSettingsTarget("models");
-              }} /></Suspense>
-              {hasEffort && !heroMode && <div className="composer-effort-control">
+              }} /></Suspense>}
+              {hasEffort && !heroMode && hostControls && <div className="composer-effort-control">
                 <ComposerChoice key={`effort-${tabId}`} label={effortLabel(currentEffort)}
                   ariaLabel={`${t("status.effortTitle")}: ${effortLabel(currentEffort)}`}
                   icon={<Brain size={16} />} showChevron

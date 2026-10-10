@@ -110,6 +110,13 @@ assert.equal(submitted.length, 1, `expected one submission, got ${JSON.stringify
 assert.equal(submitted[0]?.tabId, "child-1", "input is submitted to the companion session");
 assert.match(submitted[0]?.input ?? "", /why is this red\?/);
 
+// The host implements no model switch, approval mode or effort for a companion,
+// so the composer must not offer them: they would render live and do nothing.
+// This is Composer's hostControls, driven from SideChatPanel.
+assert.equal(container.querySelector(".modelsw"), null, "a companion offers no model switcher");
+assert.equal(container.querySelector(".composer-meta__control--approval"), null, "a companion offers no approval mode");
+assert.equal(container.querySelector(".composer-effort-control"), null, "a companion offers no effort control");
+
 // An owner the host cannot describe leaves the panel with no label line at all,
 // rather than an empty one: a titleless owner is not worth a stray "From".
 await act(async () => { await paint("parent-unknown"); });
