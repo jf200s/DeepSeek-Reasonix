@@ -36,7 +36,7 @@ func TestGlobalWorkspaceSurvivesWindowsUpdateEnvironment(t *testing.T) {
 	first := NewApp()
 	t.Cleanup(first.closeSessionServices)
 	service := first.desktopSessionService("")
-	ref, workspaceID, err := first.bindFreshDesktopSession(t.Context(), "global", "", registrySessionCreator{service})
+	ref, workspaceID, err := first.bindFreshDesktopSession(t.Context(), "global", "", registrySessionCreator{service}, "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -60,7 +60,7 @@ func TestGlobalWorkspaceSurvivesWindowsUpdateEnvironment(t *testing.T) {
 	if _, err := second.canonicalSessionWorkspace(t.Context(), ref); err != nil {
 		t.Fatalf("reopened workspace/header membership: %v", err)
 	}
-	newRef, newWorkspaceID, err := second.bindFreshDesktopSession(t.Context(), "global", "", registrySessionCreator{second.desktopSessionService("")})
+	newRef, newWorkspaceID, err := second.bindFreshDesktopSession(t.Context(), "global", "", registrySessionCreator{second.desktopSessionService("")}, "")
 	if err != nil || newWorkspaceID != workspaceID || newRef == ref {
 		t.Fatalf("new session after update: ref=%v, workspace=%q, err=%v", newRef, newWorkspaceID, err)
 	}

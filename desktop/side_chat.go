@@ -4,9 +4,20 @@ import (
 	"fmt"
 	"log/slog"
 	"sort"
+	"strings"
+	"time"
+	"unicode/utf8"
 
+	"reasonix/internal/boot"
 	"reasonix/internal/control"
 	"reasonix/internal/session"
+)
+
+const (
+	// sideChatCloseGrace bounds how long a companion close waits for a cancelled
+	// turn to drain before falling back to the detach close.
+	sideChatCloseGrace = 1500 * time.Millisecond
+	sideChatClosePoll  = 25 * time.Millisecond
 )
 
 // SideChatOpenResult identifies the companion session opened for a parent tab.
@@ -41,6 +52,10 @@ func (a *App) OpenSideChatForTab(parentTabID string) (SideChatOpenResult, error)
 	tab := a.createTabEntryWithID(scope, workspaceRoot, newTopicID(), newTabID())
 	tab.SideChat.Enabled = true
 	tab.SideChat.ParentID = parentTabID
+	tab.SideChat.ParentTitle = parent.TopicTitle
+	tab.SideChat.ParentSessionID = parent.SessionID
+	tab.SideChat.ParentGoal = currentTabGoal(parent)
+	tab.SideChat.ParentContext = sideChatParentContext(parent)
 
 	a.mu.Lock()
 	if a.tabs[parentTabID] != parent {
@@ -83,8 +98,14 @@ func (a *App) CloseSideChatTab(tabID string) error {
 	if !enabled {
 		return fmt.Errorf("side chat: tab %q is not a companion session", tabID)
 	}
+	a.cancelSideChatTurn(tab.Ctrl)
 	if err := a.closeTab(tabID, false); err != nil {
-		return err
+		// The cancelled turn had not finished draining. Fall back to the detach
+		// close: the tab still goes away, and the session delete below stops the
+		// runtime the detach handed off.
+		if detachErr := a.closeTab(tabID, true); detachErr != nil {
+			return err
+		}
 	}
 	if service == nil {
 		// No exclusive session to delete; warn so a silent leak stays visible.
@@ -92,6 +113,29 @@ func (a *App) CloseSideChatTab(tabID string) error {
 		return nil
 	}
 	return service.Delete(a.bootContext(), ref)
+}
+
+// cancelSideChatTurn stops a running companion turn so the close can proceed.
+// A companion is throwaway, so closing it cancels instead of being refused the
+// way an owner's tab would be: the design promises the user that closing a
+// companion cancels its turn and then deletes its throwaway session.
+func (a *App) cancelSideChatTurn(ctrl control.SessionAPI) {
+	if ctrl == nil || !controllerHasActiveRuntimeWork(ctrl) {
+		return
+	}
+	ctrl.Cancel()
+	ctx := a.bootContext()
+	deadline := time.Now().Add(sideChatCloseGrace)
+	for time.Now().Before(deadline) {
+		if !controllerHasActiveRuntimeWork(ctrl) {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(sideChatClosePoll):
+		}
+	}
 }
 
 // closeSideChatChildren closes every companion owned by parentTabID first, so
@@ -168,4 +212,65 @@ func (a *App) tabIsSideChat(tabID string) bool {
 	defer a.mu.RUnlock()
 	tab := a.tabs[tabID]
 	return tab != nil && tab.SideChat.Enabled
+}
+
+// sessionKindForTab names what a tab's first session is, so conversation lists
+// can leave it out. A desktop tab binds its session while its controller is
+// built, which is before its first input ever arrives: recording the kind at
+// creation is the only point that works, and EnsureSideChatSessionPath is a
+// no-op by the time a companion submits.
+func sessionKindForTab(tab *WorkspaceTab) session.SessionKind {
+	if tab != nil && tab.SideChat.Enabled {
+		return session.SessionKindSideChat
+	}
+	return ""
+}
+
+// sideChatParentContext summarises the owner's recent activity so a companion
+// can tell which conversation it belongs to without inheriting its transcript.
+// Only the last few exchanges are kept, each truncated: enough to name the work
+// in progress, never a copy of the owner's context.
+func sideChatParentContext(parent *WorkspaceTab) string {
+	if parent == nil || parent.Ctrl == nil {
+		return ""
+	}
+	history := parent.Ctrl.History()
+	if len(history) == 0 {
+		return ""
+	}
+	const keep, limit = 6, 240
+	tail := history
+	if len(tail) > keep {
+		tail = tail[len(tail)-keep:]
+	}
+	var b strings.Builder
+	for _, message := range tail {
+		text := strings.TrimSpace(message.Content)
+		if text == "" {
+			continue
+		}
+		if utf8.RuneCountInString(text) > limit {
+			text = string([]rune(text)[:limit]) + "…"
+		}
+		role := strings.TrimSpace(string(message.Role))
+		if role == "" {
+			role = "message"
+		}
+		b.WriteString("- " + role + ": " + text + "\n")
+	}
+	return strings.TrimSpace(b.String())
+}
+
+// sideChatParentForBoot hands the captured owner facts to the companion's boot
+// options; both prompt halves are assembled there.
+func sideChatParentForBoot(tab *WorkspaceTab) *boot.SideChatParent {
+	if tab == nil || !tab.SideChat.Enabled {
+		return nil
+	}
+	return &boot.SideChatParent{
+		Title:     tab.SideChat.ParentTitle,
+		SessionID: tab.SideChat.ParentSessionID,
+		Goal:      tab.SideChat.ParentGoal,
+		Context:   tab.SideChat.ParentContext,
+	}
 }

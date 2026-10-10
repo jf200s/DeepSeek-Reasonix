@@ -124,6 +124,10 @@ type Options struct {
 	// research tools plus the read-only shell wrapper, minus writer and
 	// workflow/meta tools. Desktop uses it for side-chat sessions.
 	ReadOnlySession bool
+	// SideChatParent names the conversation a companion was opened from. The
+	// owner's identity enters the system prompt and its goal/activity enter the
+	// session-context snapshot; the owner's own prefix and tools are untouched.
+	SideChatParent *SideChatParent
 	// AdditionalDirs grants this session's file writers and sandboxed shell
 	// access to extra directories without changing persisted sandbox config.
 	AdditionalDirs []string
@@ -645,7 +649,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	sysPrompt = appendCorePolicies(sysPrompt)
 	sysPrompt += "\n\n" + sessioncontext.PolicyBlock()
-	sessionContextStatic := sessioncontext.Sections{Workspace: currentWorkspacePromptLine(root)}
+	sysPrompt = appendSideChatCompanionPolicy(sysPrompt, opts.SideChatParent)
+	sessionContextStatic := sessioncontext.Sections{Workspace: currentWorkspacePromptLine(root) + sideChatCompanionContextBlock(opts.SideChatParent)}
 	// Execution modes no longer exist. Host obligations are fact-driven and
 	// never rewrite the cache-stable system prefix or tool schemas.
 	if cfg.EnvironmentEnabled() {
@@ -1692,7 +1697,6 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		return missing
 	})
 
-	// ReadOnlyExecution gives the same boundary at execution time.
 	reg = readOnlySessionRegistry(reg, opts.ReadOnlySession)
 
 	execSess := newObservedSession(sysPrompt)

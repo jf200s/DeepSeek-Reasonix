@@ -97,11 +97,18 @@ type WorkspaceTab struct {
 	SessionGeneration        uint64                     // bumps on session rotation (clear/new); frontend hydrate identity
 	ReadOnly                 bool                       // true for external channel transcripts opened for browsing
 	// SideChat groups the companion-session facts: a side-chat tab is a
-	// process-local, read-only session owned by another tab.
+	// process-local, read-only session owned by another tab. The Parent* fields
+	// are the owner's facts captured when the companion opened, so the
+	// companion's prompt can name the conversation it belongs to even after the
+	// owner changes or closes.
 	SideChat struct {
-		Enabled  bool
-		ParentID string
-		Ordinal  int
+		Enabled         bool
+		ParentID        string
+		Ordinal         int
+		ParentTitle     string
+		ParentSessionID string
+		ParentGoal      string
+		ParentContext   string
 	}
 	Takeover            struct{ Spectator bool } // handoff state grouped by its cross-runtime lifetime
 	Ctrl                control.SessionAPI       // nil while booting / on error
@@ -3768,6 +3775,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	} else if usesExclusiveV3 && identity.UsesExclusiveSession() {
 		bound, bindErr := a.bindTabCanonicalSessionTopic(
 			buildCtx, identity, cfg, tabScope, tabWorkspaceRoot, tabSessionID, startupSessionPath, model, modelFallback, tabTopicID, tabSeedTitle,
+			sessionKindForTab(tab),
 		)
 		if bindErr != nil {
 			a.recordTabStartupFailure(tab, buildGeneration, appCtx, friendlySessionLoadError(bindErr))

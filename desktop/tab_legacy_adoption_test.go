@@ -77,7 +77,7 @@ func testBootLegacyAdoption(t *testing.T, dag bool) {
 		if runtime.GOOS == "windows" {
 			lookup = strings.ToLower(filepath.VolumeName(path)) + path[len(filepath.VolumeName(path)):]
 		}
-		got, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", lookup, "", false)
+		got, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", lookup, "", false, "")
 		if err != nil || got != expected {
 			t.Fatalf("boot must open adopted identity: got=%v want=%v err=%v", got, expected, err)
 		}
@@ -104,14 +104,14 @@ func testBootLegacyAdoption(t *testing.T, dag bool) {
 			if err := os.Remove(path); err != nil {
 				t.Fatal(err)
 			}
-			got, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", lookup, "", false)
+			got, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", lookup, "", false, "")
 			if err != nil || got != expected {
 				t.Fatalf("missing retained source replaced adoption: %v %v", got, err)
 			}
 			if err := os.WriteFile(path, append(original, []byte("{\"role\":\"user\",\"content\":\"changed\"}\n")...), 0600); err != nil {
 				t.Fatal(err)
 			}
-			if got, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", lookup, "", false); err != nil || got != expected {
+			if got, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", lookup, "", false, ""); err != nil || got != expected {
 				t.Fatalf("retained source changes must not replace the adopted conversation: %v %v", got, err)
 			}
 			if ref, _ := ctrl.SessionRef(); ref != expected {
