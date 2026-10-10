@@ -48,12 +48,9 @@ func (a *App) OpenSideChatForTab(parentTabID string) (SideChatOpenResult, error)
 		return SideChatOpenResult{}, fmt.Errorf("side chat: tab %q closed while opening", parentTabID)
 	}
 	tab.SideChat.Ordinal = nextSideChatOrdinalLocked(a.tabs, parentTabID)
-	// A companion tab needs its own event sink. The generic tab factory leaves
-	// sink nil, and without one every event the companion produces (turn
-	// started, streamed text, turn done) has nowhere to go — the dock panel
-	// stayed on its empty hero while the host ran the turn, and the events
-	// surfaced nowhere else either. The owner keeps focus, so this deliberately
-	// does not activate the tab.
+	// A companion needs its own sink: the generic tab factory leaves it nil, and
+	// without one its whole turn is emitted nowhere. The owner keeps focus, so
+	// this deliberately does not activate the tab.
 	tab.sink = &tabEventSink{tabID: tab.ID, app: a}
 	a.tabs[tab.ID] = tab
 	a.tabOrder = append(a.tabOrder, tab.ID)
@@ -90,6 +87,8 @@ func (a *App) CloseSideChatTab(tabID string) error {
 		return err
 	}
 	if service == nil {
+		// No exclusive session to delete; warn so a silent leak stays visible.
+		slog.Warn("desktop: side chat closed with no session to delete", "tab", tabID)
 		return nil
 	}
 	return service.Delete(a.bootContext(), ref)
