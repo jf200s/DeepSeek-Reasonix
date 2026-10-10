@@ -45,6 +45,7 @@
     "test:submission-browser": "node bench/submission-handoff.mjs",
     "test:submission-electron": "node bench/submission-handoff.mjs --electron",
     "test:dock-electron": "node bench/dock-file-navigation.mjs --electron",
+    "test:side-chat-electron": "node bench/side-chat-dock.mjs --electron",
     "pretest": "pnpm test:terminal && pnpm test:task-monitor && pnpm test:composer && tsx src/__tests__/context-center-contract.test.ts && tsx src/__tests__/provider-model-cache.test.ts && tsx src/__tests__/format-tokens.test.ts && pnpm test:usage-stats && pnpm test:settings-responsive && pnpm test:composer-menu-viewport && pnpm test:diagnostics && pnpm test:transcript",
     "test:composer-menu-viewport": "tsx src/__tests__/composer-menu-viewport.test.ts && tsx src/__tests__/anchored-popover-scroll.test.tsx && tsx src/__tests__/anchored-overlay-lifecycle.test.tsx && tsx src/__tests__/virtual-menu-identity.test.tsx",
     "test:composer": "tsx src/__tests__/rich-composer-selection.test.tsx && tsx src/__tests__/composer-resized-input-css.test.ts && tsx src/__tests__/composer-workspace-frame-css.test.ts && node --import ./scripts/css-stub-register.mjs --import tsx src/__tests__/composer-ime.test.tsx && tsx src/__tests__/composer-autosize-scrollbar-css.test.ts",
