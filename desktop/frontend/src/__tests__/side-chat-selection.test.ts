@@ -79,6 +79,31 @@ await askInSideChat("owner-b", "a different question", "辅助对话");
 check("a companion of another owner does not absorb the selection", opened.length === 2 && useActivityBarStore.getState().tabs.length === 2, `opened=${JSON.stringify(opened)}`);
 check("the new owner's companion gets its own draft", takeSideChatDraft("child-2")?.text === "a different question");
 
+// --- with two companions for one owner, the one being read wins ---
+reset();
+opened.length = 0;
+await openSideChatTab("parent-4", "辅助对话");
+await openSideChatTab("parent-4", "辅助对话");
+const pair = useActivityBarStore.getState().tabs;
+check("one owner can hold two companions", pair.length === 2, `tabs=${pair.length}`);
+
+// addTab leaves the newest active, so this selection belongs to the second one.
+await askInSideChat("parent-4", "asked while reading the second", "辅助对话");
+check("neither companion is duplicated for the same owner", opened.length === 2, `opened=${JSON.stringify(opened)}`);
+check("the selection lands in the companion the user is reading", takeSideChatDraft("child-2")?.text === "asked while reading the second");
+check("the companion the user is not reading keeps its composer empty", takeSideChatDraft("child-1") === null);
+
+// Switching back moves the next selection with it.
+useActivityBarStore.getState().activateTab(pair[0].id);
+await askInSideChat("parent-4", "asked while reading the first", "辅助对话");
+check("the preference follows the active tab, not the array order", takeSideChatDraft("child-1")?.text === "asked while reading the first");
+
+// An active tab that is not this owner's companion falls back to the earliest.
+await openSideChatTab("owner-c", "辅助对话");
+await askInSideChat("parent-4", "asked from somewhere else", "辅助对话");
+check("an unrelated active tab falls back to the earliest companion", takeSideChatDraft("child-1")?.text === "asked from somewhere else");
+check("the fallback does not leak into the newer companion", takeSideChatDraft("child-2") === null);
+
 // --- a refused open hands nothing over ---
 reset();
 opened.length = 0;

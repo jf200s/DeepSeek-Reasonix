@@ -66,13 +66,23 @@ export async function askInSideChat(parentTabId: string, text: string, title: st
   }
 }
 
-/** The companion dock tab this owner already has, if any. */
+/**
+ * The companion dock tab this owner already has, if any. The one the user is
+ * looking at wins: a selection made while reading a companion belongs in that
+ * companion, not in whichever one happens to be oldest. Everything else falls
+ * back to the earliest — tabs stay in creation order — so the choice is
+ * deterministic rather than an accident of how the array is walked.
+ */
 function dockedCompanionOf(parentTabId: string): { id: string; childTabId: string } | null {
-  for (const tab of useActivityBarStore.getState().tabs) {
+  const { tabs, activeTabId } = useActivityBarStore.getState();
+  let earliest: { id: string; childTabId: string } | null = null;
+  for (const tab of tabs) {
     if (tab.type !== "sideChat") continue;
     if (tab.meta?.parentTabId !== parentTabId) continue;
     const childTabId = tab.meta?.childTabId;
-    if (typeof childTabId === "string" && childTabId) return { id: tab.id, childTabId };
+    if (typeof childTabId !== "string" || !childTabId) continue;
+    if (tab.id === activeTabId) return { id: tab.id, childTabId };
+    if (!earliest) earliest = { id: tab.id, childTabId };
   }
-  return null;
+  return earliest;
 }
