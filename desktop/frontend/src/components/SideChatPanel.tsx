@@ -135,8 +135,13 @@ export const SideChatPanel = memo(function SideChatPanel({
   // on mount; one deposited while it is open arrives by subscription.
   const [askDraft, setAskDraft] = useState<SideChatDraft | null>(null);
   useEffect(() => {
-    setAskDraft(takeSideChatDraft(tabId));
-    return subscribeSideChatDraft(tabId, setAskDraft);
+    // Subscribe first, then drain: a draft deposited before this panel mounted
+    // is still taken, one deposited while it is open arrives by subscription, and
+    // a second run of this effect (StrictMode, or a panel that remounted) neither
+    // drops the draft already shown nor takes the next one twice.
+    const unsubscribe = subscribeSideChatDraft(tabId, setAskDraft);
+    setAskDraft((current) => current ?? takeSideChatDraft(tabId));
+    return unsubscribe;
   }, [tabId]);
 
   const [hostError, setHostError] = useState<string | null>(null);

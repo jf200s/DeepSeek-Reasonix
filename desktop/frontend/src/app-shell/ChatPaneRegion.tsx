@@ -178,8 +178,12 @@ export function ChatPaneRegion(props: ChatPaneRegionProps) {
                 onAskInSideChat={transcript.readOnly ? undefined : (text) => {
                   // The opener owns the host round-trip, so it is imported on
                   // demand: the chat pane stays out of the bridge's import graph.
+                  // A refusal (a read-only owner) or a failed open is reported
+                  // rather than vanishing into an unhandled rejection.
                   const parentTabId = transcript.tabId ?? "";
-                  void import("../lib/sideChatOpen").then((module) => module.askInSideChat(parentTabId, text, t("sideChat.title")));
+                  void import("../lib/sideChatOpen")
+                    .then((module) => module.askInSideChat(parentTabId, text, t("sideChat.title")))
+                    .catch((error) => { console.warn("side chat: ask from selection failed", error); });
                 }}
                 onFork={commands.onFork}
                 onOpenTurnChanges={commands.onOpenTurnChanges}

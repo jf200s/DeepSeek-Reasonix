@@ -191,6 +191,10 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
   useEffect(() => {
     if (!props.onAskInSideChat) return;
     const onMouseUp = (event: MouseEvent) => {
+      // A mouseup on the floating menu itself (it is portaled to <body>) must not
+      // be read as a new selection: closing the menu here would unmount the
+      // button before its click lands, so the action would never run.
+      if ((event.target as HTMLElement | null)?.closest(".floating-menu")) return;
       const text = selectedTranscriptText();
       if (!text || !scroller.current?.contains(event.target as Node)) { setAskMenu(null); return; }
       setAskMenu({ x: event.clientX, y: event.clientY + 8, text });
