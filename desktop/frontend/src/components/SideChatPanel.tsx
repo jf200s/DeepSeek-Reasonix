@@ -207,7 +207,13 @@ export const SideChatPanel = memo(function SideChatPanel({
           if (!input.trim()) return;
           submit(tabId, displayText, input);
         }}
-        onCancel={async () => ({ discardedItemIds: [] })}
+        onCancel={async () => {
+          // The companion's own running turn is cancelled through its tab; the
+          // empty outcome keeps the composer's un-sent text (a companion has no
+          // durable queue to withdraw from).
+          runHost(app.CancelTab(tabId));
+          return { discardedItemIds: [] };
+        }}
         onCycleMode={() => {}}
         onSetMode={() => {}}
         onSetCollaborationMode={() => {}}
