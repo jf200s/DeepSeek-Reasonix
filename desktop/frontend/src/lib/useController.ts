@@ -13,6 +13,7 @@ import { useRuntimeSession } from "./useRuntimeState";
 import { acceptSessionRuntimeSnapshot, type RuntimeState } from "./runtimeStateStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
+import { createBackgroundFollow } from "./backgroundTranscriptFollow";
 import { createControllerModelCommands } from "./controllerModelCommands";
 import { compactArchivedToolItems } from "./archivedToolItems";
 import { addBreadcrumb } from "./breadcrumbs";
@@ -2627,16 +2628,11 @@ export function useController() {
     });
     transcriptSubscriptions.current.set(tabId, unsubscribe);
   }, [dispatchTo, bumpSessionLoadSeq]);
-  const startTranscriptFollow = useCallback(async (tabId: string, path: string) => {
-    ensureTranscriptSubscription(tabId, { path, key: sessionIdentityStableKey(statesRef.current.get(tabId)?.meta) });
-    followers.current.get(tabId)?.stop();
-    const follower = new TranscriptSessionFollower(tabId, path, false, action => {
-      if (followers.current.get(tabId) === follower) dispatchTo(tabId, action);
-    });
-    followers.current.set(tabId, follower);
-    await follower.start();
-    return follower.metrics;
-  }, [dispatchTo, ensureTranscriptSubscription]);
+  const backgroundFollow = useMemo(() => createBackgroundFollow({
+    followers, state: (tabId) => statesRef.current.get(tabId),
+    subscribe: ensureTranscriptSubscription, dispatch: dispatchTo,
+  }), [dispatchTo, ensureTranscriptSubscription]);
+  const startTranscriptFollow = backgroundFollow.start;
   const detachTranscriptState = useCallback((tabId: string) => {
     followers.current.get(tabId)?.stop();
     followers.current.delete(tabId);
@@ -3355,18 +3351,8 @@ export function useController() {
     const handleWireEvent = (e: WireEvent) => {
       const targetTabId = e.tabId;
       if (!targetTabId) throw new Error("ordered event has no target tab");
-      // A tab the main area is not showing still needs its own transcript
-      // follower: the follower is what turns events into state, and the
-      // ready/hydrate path covers only the active tab. Checked per event (not on
-      // readiness) so it cannot depend on a background tab ever receiving a
-      // ready event, and so a companion tab created after the last hydrate still
-      // attaches as soon as its meta lands.
-      if (!followers.current.has(targetTabId)) {
-        const target = statesRef.current.get(targetTabId);
-        if (target?.meta && !target.hydrating && !target.backendActivationPending && !needsColdHistory(target.meta)) {
-          void startTranscriptFollow(targetTabId, target.meta.sessionPath ?? "").catch(() => {});
-        }
-      }
+      // Per event, not on readiness: a companion's meta lands after creation.
+      backgroundFollow.attach(targetTabId);
       if (e.kind === "turn_done" || e.tool) void import("./autoHTML")
         .then((module) => module.default(e, targetTabId, activeTabIdRef, statesRef));
       if (e.kind === "turn_done" || e.kind === "context_maintenance") {
@@ -3394,18 +3380,9 @@ export function useController() {
     const offReady = onReady((readyTabId) => {
       const activeId = activeTabIdRef.current;
       if (readyTabId && activeId && readyTabId !== activeId) {
-        // A tab the main area is not showing — the dock's companion session —
-        // still needs its own transcript follower: events reach a tab's state
-        // only through that follower, so returning here left the companion panel
-        // on its empty hero while the host ran the turn in full. Same shape as
-        // the rebuilt-controller path below, and no navigation: a background
-        // tab's readiness is not a navigation intent.
-        const state = statesRef.current.get(readyTabId);
-        if (state?.meta && !state.hydrating && !state.backendActivationPending
-          && !needsColdHistory(state.meta) && !followers.current.has(readyTabId)) {
-          void startTranscriptFollow(readyTabId, state.meta.sessionPath ?? "").catch(error =>
-            dispatchTo(readyTabId, { type: "transcript_connection", status: "disconnected", error: String(error) }));
-        }
+        // A tab the main area is not showing still needs a follower, but its
+        // readiness is not a navigation intent.
+        backgroundFollow.attachOnReady(readyTabId);
         addBreadcrumb("tab.hydrate", `ready tail-follow ${readyTabId}`);
         return;
       }
