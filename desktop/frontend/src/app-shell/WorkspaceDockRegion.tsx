@@ -7,6 +7,7 @@ import type { RightDockMode } from "../store/layout";
 import type { TabItem } from "../store/activityBar";
 import { useActivityBarStore } from "../store/activityBar";
 import { readWorkspaceTreeMemory, workspaceViewMemoryKey } from "../lib/workspaceViewMemory";
+import { useToast } from "../lib/toast";
 import { useDockViewRequests } from "./useDockViewRequests";
 
 // The tab strip, its drag state machine and the add menu are a deferred
@@ -58,6 +59,7 @@ export type WorkspaceDockRegionProps = {
 /** The right-hand dock shared by every workspace tab. */
 export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   const { visible, overlay, mode, showContext, t } = props;
+  const { showToast } = useToast();
   const firstFileTabId = useActivityBarStore(state => state.tabs.find(tab => tab.type === "file")?.id);
   const loadedRoot = useActivityBarStore(state => state.workspaceRoot);
   const activeTabId = useActivityBarStore(state => state.activeTabId);
@@ -74,7 +76,15 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   // so the opener is loaded on demand and this region keeps the host bridge out
   // of its own import graph.
   const openSideChat = (title: string) => {
-    void import("../lib/sideChatOpen").then((module) => module.openSideChatTab(props.workspace.tabId ?? "", title));
+    void import("../lib/sideChatOpen")
+      .then((module) => module.openSideChatTab(props.workspace.tabId ?? "", title))
+      .catch((error) => {
+        // A read-only owner has no companion to offer. Say so: this menu entry is
+        // the one opener that cannot check the owner itself, so the host's
+        // refusal is a signal the user would otherwise never see.
+        console.warn("side chat: open from the dock failed", error);
+        showToast(t("sideChat.unavailable"), "info", { durationMs: 6000 });
+      });
   };
 
   const renderTab = (tab: TabItem): ReactNode => {

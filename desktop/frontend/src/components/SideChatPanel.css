@@ -32,6 +32,21 @@
   padding: 0 8px;
 }
 
+/* The owner label: one muted line naming the conversation this companion
+   belongs to, so a dock holding several companions stays readable. Like the
+   rest of the panel it paints no surface of its own — the dock owns the
+   background, and the theme pack decides what that is. */
+.side-chat-panel__parent {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 6px 8px 0;
+  color: var(--fg-dim);
+  font-size: var(--font-size-small, 12px);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 /* A refused host call is reported here instead of escaping as an
    unhandledrejection that raises the shell's crash overlay. */
 .side-chat-panel__error {

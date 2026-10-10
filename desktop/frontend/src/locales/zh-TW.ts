@@ -383,8 +383,11 @@ export const zhTW: Record<DictKey, string> = {
   "rightDock.terminal": "終端機",
   "sideChat.title": "輔助對話",
   "sideChat.openFromSelection": "在輔助對話中提問",
+  // No surface uses this yet: the side-chat contract reserves the key but never
+  // defined which interaction blocks on a pending companion request.
   "sideChat.blocked": "請先處理輔助對話中的待處理請求。",
   "sideChat.unavailable": "請在支援輔助對話的可編輯主任務中使用。",
+  "sideChat.fromParent": "來自：{label}",
   "rightDock.launcher": "開啟工作區面板",
   "rightDock.launcherTitle": "工作區",
   "rightDock.showLauncher": "展開工作區浮層",

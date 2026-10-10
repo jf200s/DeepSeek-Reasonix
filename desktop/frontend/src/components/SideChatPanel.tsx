@@ -8,6 +8,7 @@ import { Composer } from "./Composer";
 import { Transcript } from "./Transcript";
 import "./SideChatPanel.css";
 import { app } from "../lib/bridge";
+import { useT } from "../lib/i18n";
 import { getTranscriptStore } from "../lib/transcriptStore";
 import { subscribeSideChatDraft, takeSideChatDraft, type SideChatDraft } from "../lib/sideChatDraft";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
@@ -45,9 +46,28 @@ export const SideChatPanel = memo(function SideChatPanel({
   cwd,
   onSubmit,
 }: SideChatPanelProps) {
-  void parentTabId;
+  const t = useT();
   const state = useSideChatState(tabId);
   const items = state?.items ?? [];
+
+  // The owner's title, so a dock holding several companions says which
+  // conversation each one belongs to. It is read through the host rather than
+  // the dock store: an owner is a main-area tab and never appears among the
+  // dock tabs, so the dock store has nothing to look up.
+  const [parentLabel, setParentLabel] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve()
+      .then(() => app.MetaForTab(parentTabId))
+      .then((meta) => {
+        if (cancelled) return;
+        setParentLabel(meta?.label ?? "");
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [parentTabId]);
   // The host creates the companion child tab, so the main-area tab flow never
   // hydrates it. Without a state carrying that tab's meta, every event tagged
   // for the companion fails the controller's sessionGeneration check and the
@@ -155,6 +175,11 @@ export const SideChatPanel = memo(function SideChatPanel({
 
   return (
     <div className="side-chat-panel" data-side-chat-tab-id={tabId}>
+      {parentLabel ? (
+        <div className="side-chat-panel__parent" data-side-chat-parent-id={parentTabId}>
+          {t("sideChat.fromParent", { label: parentLabel })}
+        </div>
+      ) : null}
       {hostError ? (
         <div className="side-chat-panel__error" role="alert">
           {hostError}
