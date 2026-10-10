@@ -3,13 +3,19 @@
 // uses. The host builds that child session with a read-only tool registry, so
 // the panel never needs a read-only variant of its own — it displays and
 // submits, and the session's own tool set is what makes it read-only.
-import { memo, useSyncExternalStore } from "react";
+import { lazy, memo, Suspense, useEffect, useSyncExternalStore, useState } from "react";
 import { Composer } from "./Composer";
 import { Transcript } from "./Transcript";
+import "./SideChatPanel.css";
 import { app } from "../lib/bridge";
 import { getTranscriptStore } from "../lib/transcriptStore";
 import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
-import type { State } from "../lib/useController";
+import { initialState, type Item, type State } from "../lib/useController";
+
+// The same decision cards the main area shows. They stay lazy so a companion
+// with no pending prompt never loads them.
+const AskCard = lazy(() => import("./AskCard").then((module) => ({ default: module.AskCard })));
+const ApprovalModal = lazy(() => import("./ApprovalModal").then((module) => ({ default: module.ApprovalModal })));
 
 /** The dock shows one companion per tab; its state lives in the per-tab store. */
 function useSideChatState(tabId: string): State | null {
@@ -41,14 +47,103 @@ export const SideChatPanel = memo(function SideChatPanel({
   void parentTabId;
   const state = useSideChatState(tabId);
   const items = state?.items ?? [];
+  // The host creates the companion child tab, so the main-area tab flow never
+  // hydrates it. Without a state carrying that tab's meta, every event tagged
+  // for the companion fails the controller's sessionGeneration check and the
+  // panel stays on its empty hero while the backend is actually running the
+  // turn. Registering the meta here is what lets the shared per-tab reducer
+  // accept the companion's events.
+  useEffect(() => {
+    let cancelled = false;
+    // Routed through a promise so a host without the command (older shell, test
+    // stub) degrades to "no meta registered" instead of throwing during mount.
+    void Promise.resolve()
+      .then(() => app.MetaForTab(tabId))
+      .then((meta) => {
+        if (cancelled || !meta) return;
+        const store = getTranscriptStore();
+        const current = store.states.get(tabId);
+        store.setState(tabId, { ...(current ?? initialState), meta });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [tabId]);
+
+  // The companion already has history when the panel mounts (the session may
+  // have been running before the dock tab existed). Nothing else hydrates a
+  // child tab, so without this the panel shows its empty hero while the
+  // conversation continues on the host — the exact "sent a message, nothing
+  // happens" symptom. Live turns still arrive through the shared event stream,
+  // so this only seeds the transcript once and never overwrites richer items.
+  useEffect(() => {
+    let cancelled = false;
+    void Promise.resolve()
+      .then(() => app.HistoryForTab(tabId))
+      .then((messages) => {
+        if (cancelled) return;
+        if (!Array.isArray(messages)) {
+          setHostError(`history: unexpected payload ${typeof messages}`);
+          return;
+        }
+        const store = getTranscriptStore();
+        const current = store.states.get(tabId);
+        if (current && current.items.length > 0) return;
+        const items: Item[] = [];
+        messages.forEach((message, index) => {
+          const text = typeof message.content === "string" ? message.content : "";
+          if (!text.trim() || message.role === "system") return;
+          // A companion's history is display-only here, so a missing id falls back
+          // to its position instead of failing the projection.
+          const id = message.messageId ?? `${tabId}-history-${index}`;
+          if (message.role === "user") items.push({ kind: "user", id, text });
+          else if (message.role === "assistant") {
+            items.push({ kind: "assistant", id, text, reasoning: "", streaming: false });
+          }
+        });
+        store.setState(tabId, { ...(current ?? initialState), items });
+      })
+      .catch((error) => {
+        setHostError(`history: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [tabId]);
+
+  // A pending ask or approval lives on the host until something replays it, and
+  // the companion is never the active main tab, so nothing else does. Without
+  // this a companion blocked on a question stays blocked with no way to answer.
+  useEffect(() => {
+    void Promise.resolve()
+      .then(() => app.ReplayPendingPromptsForTab(tabId))
+      .catch(() => {});
+  }, [tabId]);
+
   // The panel owns this command rather than the dock region: the region is a
   // pure presentation layer and must not pull the host bridge into its imports.
+  //
+  // Every host call is caught: a rejected submit used to escape as an
+  // unhandledrejection and raise the shell's crash overlay over the whole
+  // window, which is why a refused send looked like "nothing happens". The
+  // companion reports the refusal in place instead, like the main area does.
+  const [hostError, setHostError] = useState<string | null>(null);
+  const runHost = (call: Promise<unknown>) => {
+    call.catch((error) => setHostError(error instanceof Error ? error.message : String(error)));
+  };
   const submit = onSubmit ?? ((target: string, display: string, input: string) => {
-    void app.SubmitDisplayToTab(target, display, input);
+    setHostError(null);
+    runHost(app.SubmitDisplayToTab(target, display, input));
   });
 
   return (
     <div className="side-chat-panel" data-side-chat-tab-id={tabId}>
+      {hostError ? (
+        <div className="side-chat-panel__error" role="alert">
+          {hostError}
+        </div>
+      ) : null}
       <Transcript
         items={items}
         tabId={tabId}
@@ -56,6 +151,44 @@ export const SideChatPanel = memo(function SideChatPanel({
         running={state?.running ?? false}
         onPrompt={() => {}}
       />
+      {state?.ask ? (
+        <div className="side-chat-panel__decision">
+          <Suspense fallback={null}>
+            <AskCard
+              ask={state.ask}
+              draftScope={`side-chat:${tabId}`}
+              onAnswer={(id, answers) => {
+                runHost(app.AnswerQuestionForTab(tabId, id, answers));
+              }}
+              onDismiss={() => {
+                const ask = state.ask;
+                if (ask) runHost(app.AnswerQuestionForTab(tabId, ask.id, []));
+              }}
+              onStop={() => {
+                runHost(app.CancelTab(tabId));
+              }}
+            />
+          </Suspense>
+        </div>
+      ) : null}
+      {state?.approval ? (
+        <div className="side-chat-panel__decision">
+          <Suspense fallback={null}>
+            <ApprovalModal
+              approval={state.approval}
+              tabId={tabId}
+              cwd={cwd}
+              onAnswer={(allow, session, persist) => {
+                const approval = state.approval;
+                if (approval) runHost(app.ApproveTab(tabId, approval.id, allow, session, persist));
+              }}
+              onStop={() => {
+                runHost(app.CancelTab(tabId));
+              }}
+            />
+          </Suspense>
+        </div>
+      ) : null}
       <Composer
         running={state?.running ?? false}
         collaborationMode={"normal" as CollaborationMode}

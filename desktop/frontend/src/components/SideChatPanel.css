@@ -1,0 +1,57 @@
+/* The companion panel is a dock tab, not the main area: it must fill whatever
+   width the dock gives it and never widen the dock from the inside. Without an
+   explicit min-width:0 the transcript's intrinsic content (hero, tables, code)
+   sets the column width instead of the panel, so the panel neither fits the
+   dock nor follows a dock resize. */
+.side-chat-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  /* Theme text colour only. The dock panel is transparent everywhere else, so
+     painting a surface here would draw a white slab over the dock's own
+     background instead of matching the sibling panels. */
+  color: var(--fg);
+}
+
+/* The transcript owns the scroll area; the composer stays pinned below it. */
+.side-chat-panel > .transcript {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Decision cards sit above the composer, like the main area's footer, so a
+   pending ask or approval is answerable without leaving the companion. */
+.side-chat-panel__decision {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+/* A refused host call is reported here instead of escaping as an
+   unhandledrejection that raises the shell's crash overlay. */
+.side-chat-panel__error {
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 6px 8px;
+  color: var(--fg);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: var(--font-size-small, 12px);
+  overflow-wrap: anywhere;
+}
+
+/* Wide descendants (code blocks, tables, hero cards) scroll or shrink inside
+   the panel instead of stretching it. */
+.side-chat-panel > .transcript,
+.side-chat-panel > .transcript * {
+  max-width: 100%;
+}
+
+.side-chat-panel .transcript__window,
+.side-chat-panel .chat-column {
+  min-width: 0;
+}
