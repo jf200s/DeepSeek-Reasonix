@@ -61,10 +61,10 @@ func TestPinnedContextLoaderAppendsAtAdmittedTurns(t *testing.T) {
 		Executor:     exec,
 		SystemPrompt: "BASE",
 		SessionPath:  sessionPath,
-		PinnedContextLoader: func(_ context.Context, path string) (agent.PinnedContextSnapshot, error) {
+		PinnedContextLoader: func(_ context.Context, target PinnedContextTarget) (agent.PinnedContextSnapshot, error) {
 			loads++
-			if path != sessionPath {
-				t.Fatalf("loader path = %q", path)
+			if target.Path != sessionPath || target.SessionID != "" {
+				t.Fatalf("loader target = %+v", target)
 			}
 			return agent.PinnedContextSnapshot{Files: []agent.PinnedContextFile{{Path: "a.md", Content: content}}}, nil
 		},

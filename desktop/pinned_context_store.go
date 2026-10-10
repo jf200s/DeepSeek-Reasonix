@@ -7,10 +7,12 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/config"
 	"reasonix/internal/fileutil"
 	"reasonix/internal/store"
 )
@@ -26,12 +28,48 @@ type pinnedContextState struct {
 	Files         []string `json:"files"`
 }
 
-func emptyPinnedContextState(sessionPath string) pinnedContextState {
+func pinnedContextStateFor(owner string) pinnedContextState {
 	return pinnedContextState{
 		SchemaVersion: pinnedContextSchemaVersion,
-		SessionID:     agent.BranchID(sessionPath),
+		SessionID:     owner,
 		Files:         []string{},
 	}
+}
+
+func emptyPinnedContextState(sessionPath string) pinnedContextState {
+	return pinnedContextStateFor(agent.BranchID(sessionPath))
+}
+
+// pinnedContextSidecarForSession is the sidecar of a canonical session. A
+// canonical session intentionally carries no legacy transcript path, so its
+// pinned context lives inside the v5 by-id directory beside its own records.
+func pinnedContextSidecarForSession(sessionID string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	root := config.DesktopSessionStoreDir()
+	if root == "" {
+		return ""
+	}
+	return filepath.Join(root, sessionID, store.PinnedContextSidecarName)
+}
+
+// pinnedContextSidecarFor resolves a session's sidecar from either identity, so
+// callers that may hold a canonical session or a legacy one share one path.
+func pinnedContextSidecarFor(sessionID, sessionPath string) string {
+	if id := strings.TrimSpace(sessionID); id != "" {
+		return pinnedContextSidecarForSession(id)
+	}
+	return store.SessionPinnedContext(sessionPath)
+}
+
+// pinnedContextOwner is the session identity a sidecar records and logs.
+func pinnedContextOwner(sessionID, sessionPath string) string {
+	if id := strings.TrimSpace(sessionID); id != "" {
+		return id
+	}
+	return agent.BranchID(sessionPath)
 }
 
 func normalizePinnedContextFiles(files []string) ([]string, error) {
@@ -55,14 +93,15 @@ func normalizePinnedContextFiles(files []string) ([]string, error) {
 	return out, nil
 }
 
-func loadPinnedContextState(sessionPath string) (pinnedContextState, error) {
-	sessionPath = strings.TrimSpace(sessionPath)
-	state := emptyPinnedContextState(sessionPath)
-	if sessionPath == "" {
+// readPinnedContextSidecar decodes and validates one sidecar. A missing file
+// yields the empty state; owner must match the recorded owner so a stale
+// sidecar can never seed a different session.
+func readPinnedContextSidecar(sidecar, owner string) (pinnedContextState, error) {
+	state := pinnedContextStateFor(owner)
+	if strings.TrimSpace(sidecar) == "" {
 		return state, nil
 	}
-	path := store.SessionPinnedContext(sessionPath)
-	file, err := os.Open(path)
+	file, err := os.Open(sidecar)
 	if errors.Is(err, os.ErrNotExist) {
 		return state, nil
 	}
@@ -85,33 +124,34 @@ func loadPinnedContextState(sessionPath string) (pinnedContextState, error) {
 		return state, fmt.Errorf("pinned context state exceeds %d bytes", maxPinnedContextStateBytes)
 	}
 	if err := json.Unmarshal(raw, &state); err != nil {
-		return emptyPinnedContextState(sessionPath), fmt.Errorf("decode pinned context state: %w", err)
+		return pinnedContextStateFor(owner), fmt.Errorf("decode pinned context state: %w", err)
 	}
 	if state.SchemaVersion != pinnedContextSchemaVersion {
-		return emptyPinnedContextState(sessionPath), fmt.Errorf("unsupported pinned context schema version %d", state.SchemaVersion)
+		return pinnedContextStateFor(owner), fmt.Errorf("unsupported pinned context schema version %d", state.SchemaVersion)
 	}
-	wantID := agent.BranchID(sessionPath)
-	if state.SessionID != wantID {
-		return emptyPinnedContextState(sessionPath), fmt.Errorf("pinned context belongs to session %q, not %q", state.SessionID, wantID)
+	if state.SessionID != owner {
+		return pinnedContextStateFor(owner), fmt.Errorf("pinned context belongs to session %q, not %q", state.SessionID, owner)
 	}
 	files, err := normalizePinnedContextFiles(state.Files)
 	if err != nil {
-		return emptyPinnedContextState(sessionPath), err
+		return pinnedContextStateFor(owner), err
 	}
 	state.Files = files
 	return state, nil
 }
 
-func savePinnedContextState(sessionPath string, files []string) error {
-	sessionPath = strings.TrimSpace(sessionPath)
-	if sessionPath == "" {
+// writePinnedContextSidecar persists one session's pinned files. It creates the
+// owning directory, because a canonical session's by-id directory is not
+// guaranteed to exist before its first pin.
+func writePinnedContextSidecar(sidecar, owner string, files []string) error {
+	if strings.TrimSpace(sidecar) == "" || strings.TrimSpace(owner) == "" {
 		return fmt.Errorf("session is not ready")
 	}
 	normalized, err := normalizePinnedContextFiles(files)
 	if err != nil {
 		return err
 	}
-	state := emptyPinnedContextState(sessionPath)
+	state := pinnedContextStateFor(owner)
 	state.Files = normalized
 	raw, err := json.Marshal(state)
 	if err != nil {
@@ -121,7 +161,46 @@ func savePinnedContextState(sessionPath string, files []string) error {
 	if len(raw) > maxPinnedContextStateBytes {
 		return fmt.Errorf("pinned context state exceeds %d bytes", maxPinnedContextStateBytes)
 	}
-	return fileutil.AtomicWriteFileStrict(store.SessionPinnedContext(sessionPath), raw, 0o600)
+	if err := os.MkdirAll(filepath.Dir(sidecar), 0o755); err != nil {
+		return fmt.Errorf("create pinned context directory: %w", err)
+	}
+	return fileutil.AtomicWriteFileStrict(sidecar, raw, 0o600)
+}
+
+// loadPinnedContextState reads a legacy session's sibling sidecar.
+func loadPinnedContextState(sessionPath string) (pinnedContextState, error) {
+	return readPinnedContextSidecar(store.SessionPinnedContext(sessionPath), agent.BranchID(sessionPath))
+}
+
+// savePinnedContextState writes a legacy session's sibling sidecar.
+func savePinnedContextState(sessionPath string, files []string) error {
+	return writePinnedContextSidecar(store.SessionPinnedContext(sessionPath), agent.BranchID(sessionPath), files)
+}
+
+// loadPinnedContextStateForSession reads a canonical session's v5 sidecar.
+func loadPinnedContextStateForSession(sessionID string) (pinnedContextState, error) {
+	return readPinnedContextSidecar(pinnedContextSidecarForSession(sessionID), strings.TrimSpace(sessionID))
+}
+
+// savePinnedContextStateForSession writes a canonical session's v5 sidecar.
+func savePinnedContextStateForSession(sessionID string, files []string) error {
+	return writePinnedContextSidecar(pinnedContextSidecarForSession(sessionID), strings.TrimSpace(sessionID), files)
+}
+
+// pinnedContextLoad reads whichever sidecar the given identity owns.
+func pinnedContextLoad(sessionID, sessionPath string) (pinnedContextState, error) {
+	if id := strings.TrimSpace(sessionID); id != "" {
+		return loadPinnedContextStateForSession(id)
+	}
+	return loadPinnedContextState(sessionPath)
+}
+
+// pinnedContextSave writes whichever sidecar the given identity owns.
+func pinnedContextSave(sessionID, sessionPath string, files []string) error {
+	if id := strings.TrimSpace(sessionID); id != "" {
+		return savePinnedContextStateForSession(id, files)
+	}
+	return savePinnedContextState(sessionPath, files)
 }
 
 func loadOrMigratePinnedContextState(sessionPath string, legacy []string) (pinnedContextState, error) {
@@ -167,22 +246,22 @@ func copyPinnedContextState(sourcePath, targetPath string) error {
 	return savePinnedContextState(targetPath, state.Files)
 }
 
-func loadPinnedContextStateOrEmpty(sessionPath, logMessage string) pinnedContextState {
-	state, err := loadPinnedContextState(sessionPath)
+func pinnedContextStateOrEmpty(sessionID, sessionPath, logMessage string) pinnedContextState {
+	state, err := pinnedContextLoad(sessionID, sessionPath)
 	if err == nil {
 		return state
 	}
-	slog.Warn(logMessage, "session", agent.BranchID(sessionPath), "err", err)
-	return emptyPinnedContextState(sessionPath)
+	slog.Warn(logMessage, "session", pinnedContextOwner(sessionID, sessionPath), "err", err)
+	return pinnedContextStateFor(pinnedContextOwner(sessionID, sessionPath))
 }
 
 func prepareStartupPinnedContext(tab *WorkspaceTab, startupPath, persistedPath string) {
 	if startupPath != "" {
-		migratePendingLegacyPinnedFiles(tab, startupPath)
+		migratePendingLegacyPinnedFiles(tab, tab.SessionID, startupPath)
 		if len(tab.pendingLegacyPinnedFilesForPersistence()) > 0 {
 			return
 		}
-		state := loadPinnedContextStateOrEmpty(startupPath, "desktop: load startup pinned context")
+		state := pinnedContextStateOrEmpty(tab.SessionID, startupPath, "desktop: load startup pinned context")
 		tab.setPinnedFiles(state.Files)
 	} else if strings.TrimSpace(persistedPath) != "" {
 		// A rejected persisted path must not seed its replacement. A pathless
@@ -193,9 +272,20 @@ func prepareStartupPinnedContext(tab *WorkspaceTab, startupPath, persistedPath s
 
 func restoreTabPinnedContext(tab *WorkspaceTab, legacy []string) {
 	// Canonical identities and rejected locators must never enter the legacy
-	// sidecar migration. Keep upgrade input until a verified binding owns it.
+	// sidecar migration. A canonical session reads its own v5 sidecar; upgrade
+	// input stays pending until a verified binding owns the migration.
 	if tab.SessionID != "" {
-		tab.retainLegacyPinnedFiles(legacy)
+		state, err := loadPinnedContextStateForSession(tab.SessionID)
+		if err != nil {
+			tab.retainLegacyPinnedFiles(legacy)
+			slog.Warn("desktop: restore canonical pinned context", "session", tab.SessionID, "err", err)
+			return
+		}
+		if len(legacy) > 0 {
+			tab.setPinnedFilesState(state.Files, legacy)
+			return
+		}
+		tab.setPinnedFiles(state.Files)
 		return
 	}
 	path := ""
@@ -220,33 +310,36 @@ func restoreTabPinnedContext(tab *WorkspaceTab, legacy []string) {
 	tab.setPinnedFiles(state.Files)
 }
 
-func migratePendingLegacyPinnedFiles(tab *WorkspaceTab, sessionPath string) {
+func migratePendingLegacyPinnedFiles(tab *WorkspaceTab, sessionID, sessionPath string) {
 	legacy := tab.pendingLegacyPinnedFilesForPersistence()
-	if len(legacy) == 0 || strings.TrimSpace(sessionPath) == "" {
+	sidecar := pinnedContextSidecarFor(sessionID, sessionPath)
+	if len(legacy) == 0 || strings.TrimSpace(sidecar) == "" {
 		return
 	}
-	sidecar := store.SessionPinnedContext(sessionPath)
 	if _, err := os.Stat(sidecar); err == nil {
-		if _, loadErr := loadPinnedContextState(sessionPath); loadErr == nil {
+		if _, loadErr := pinnedContextLoad(sessionID, sessionPath); loadErr == nil {
 			tab.clearPendingLegacyPinnedFiles()
 		}
 		return
 	} else if !errors.Is(err, os.ErrNotExist) {
 		return
 	}
-	if err := savePinnedContextState(sessionPath, legacy); err != nil {
+	if err := pinnedContextSave(sessionID, sessionPath, legacy); err != nil {
 		slog.Warn("desktop: migrate pending legacy pinned context", "err", err)
 		return
 	}
 	tab.clearPendingLegacyPinnedFiles()
 }
 
-func pinnedContextStateForSessionBinding(tab *WorkspaceTab, sessionPath string) (pinnedContextState, bool) {
+// pinnedContextStateForSessionBinding loads the pinned state a tab adopts when
+// it binds a session, and reports whether pending upgrade input must survive.
+// Canonical bindings read the v5 sidecar; legacy bindings read the sibling file.
+func pinnedContextStateForSessionBinding(tab *WorkspaceTab, sessionID, sessionPath string) (pinnedContextState, bool) {
 	pendingLegacy := tab.pendingLegacyPinnedFilesForPersistence()
-	_, sidecarErr := os.Stat(store.SessionPinnedContext(sessionPath))
-	state, err := loadPinnedContextState(sessionPath)
+	_, sidecarErr := os.Stat(pinnedContextSidecarFor(sessionID, sessionPath))
+	state, err := pinnedContextLoad(sessionID, sessionPath)
 	if err != nil {
-		slog.Warn("desktop: load session pinned context", "session", agent.BranchID(sessionPath), "err", err)
+		slog.Warn("desktop: load session pinned context", "session", pinnedContextOwner(sessionID, sessionPath), "err", err)
 	}
 	preserveLegacy := len(pendingLegacy) > 0 && (errors.Is(sidecarErr, os.ErrNotExist) || err != nil)
 	return state, preserveLegacy

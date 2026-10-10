@@ -71,15 +71,21 @@ func SessionContext(sessionPath string) string {
 	return sessionStem(sessionPath) + ".context.json"
 }
 
+// PinnedContextSidecarName is the pinned-context sidecar's file name. A
+// canonical (v5) session keeps it inside its by-id directory beside
+// manifest.json, so callers join this name with the directory that owns the
+// session; a legacy session keeps it beside its transcript.
+const PinnedContextSidecarName = "pinned-context.json"
+
 // SessionPinnedContext is the optional desktop pinned-workspace-context
-// sidecar (<id>.pinned-context.json). Older versions ignore it while keeping
-// the primary transcript fully readable.
+// sidecar of a legacy session (<id>.pinned-context.json). Older versions ignore
+// it while keeping the primary transcript fully readable.
 func SessionPinnedContext(sessionPath string) string {
 	sessionPath = strings.TrimSpace(sessionPath)
 	if sessionPath == "" {
 		return ""
 	}
-	return sessionStem(sessionPath) + ".pinned-context.json"
+	return sessionStem(sessionPath) + "." + PinnedContextSidecarName
 }
 
 // sessionStem strips the .jsonl suffix so a sidecar sits beside the session as

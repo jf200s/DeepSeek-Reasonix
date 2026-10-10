@@ -4097,7 +4097,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	if topicID != "" {
 		topicSource = loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID)
 	}
-	pinnedState, preservePendingLegacy := pinnedContextStateForSessionBinding(tab, binding.path)
+	pinnedState, preservePendingLegacy := pinnedContextStateForSessionBinding(tab, tab.SessionID, binding.path)
 
 	a.mu.Lock()
 	current := a.tabs[tab.ID]
@@ -7600,7 +7600,7 @@ func (a *App) persistTabSessionPath(tab *WorkspaceTab, path string) {
 	// A tab restored from the short-lived tab-scoped implementation may not
 	// have had a session path when startup loaded its legacy pins. Publish that
 	// one-time migration before reconcile loads the new session-owned sidecar.
-	migratePendingLegacyPinnedFiles(tab, path)
+	migratePendingLegacyPinnedFiles(tab, tab.SessionID, path)
 	if reconciled, ok := a.reconcileTabWithSessionPath(tab, path); ok {
 		path = canonicalTabSessionPath(reconciled)
 	}
