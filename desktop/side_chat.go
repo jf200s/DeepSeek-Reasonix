@@ -18,6 +18,10 @@ const (
 	// turn to drain before falling back to the detach close.
 	sideChatCloseGrace = 1500 * time.Millisecond
 	sideChatClosePoll  = 25 * time.Millisecond
+	// sideChatOwnerStandingContextPath names the synthetic standing-context entry
+	// that carries the owner's live goal and recent activity. It is not a file on
+	// disk and never enters the tab's pinned-file list.
+	sideChatOwnerStandingContextPath = "companion/owner-context"
 )
 
 // SideChatOpenResult identifies the companion session opened for a parent tab.
@@ -54,8 +58,6 @@ func (a *App) OpenSideChatForTab(parentTabID string) (SideChatOpenResult, error)
 	tab.SideChat.ParentID = parentTabID
 	tab.SideChat.ParentTitle = parent.TopicTitle
 	tab.SideChat.ParentSessionID = parent.SessionID
-	tab.SideChat.ParentGoal = currentTabGoal(parent)
-	tab.SideChat.ParentContext = sideChatParentContext(parent)
 
 	a.mu.Lock()
 	if a.tabs[parentTabID] != parent {
@@ -261,8 +263,45 @@ func sideChatParentContext(parent *WorkspaceTab) string {
 	return strings.TrimSpace(b.String())
 }
 
-// sideChatParentForBoot hands the captured owner facts to the companion's boot
-// options; both prompt halves are assembled there.
+// sideChatOwnerStandingContext returns the owner's live goal and recent
+// activity for a companion tab. Reading it per turn lets the companion follow
+// its owner through standing context, which appends a revision only when this
+// text actually changes.
+func (a *App) sideChatOwnerStandingContext(tabID string) string {
+	tab := a.tabByID(tabID)
+	if tab == nil {
+		return ""
+	}
+	a.mu.RLock()
+	owned := tab.SideChat.Enabled
+	parentID := tab.SideChat.ParentID
+	a.mu.RUnlock()
+	if !owned || parentID == "" {
+		return ""
+	}
+	parent := a.tabByID(parentID)
+	if parent == nil {
+		return ""
+	}
+	goal := strings.TrimSpace(currentTabGoal(parent))
+	activity := strings.TrimSpace(sideChatParentContext(parent))
+	if goal == "" && activity == "" {
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("The conversation this companion belongs to.\n")
+	if goal != "" {
+		b.WriteString("goal: " + goal + "\n")
+	}
+	if activity != "" {
+		b.WriteString("recent activity:\n" + activity)
+	}
+	return b.String()
+}
+
+// sideChatParentForBoot hands the stable owner facts to the companion's boot
+// options. The owner's goal and recent activity deliberately stay out of them:
+// they arrive per turn as standing context instead.
 func sideChatParentForBoot(tab *WorkspaceTab) *boot.SideChatParent {
 	if tab == nil || !tab.SideChat.Enabled {
 		return nil
@@ -270,7 +309,5 @@ func sideChatParentForBoot(tab *WorkspaceTab) *boot.SideChatParent {
 	return &boot.SideChatParent{
 		Title:     tab.SideChat.ParentTitle,
 		SessionID: tab.SideChat.ParentSessionID,
-		Goal:      tab.SideChat.ParentGoal,
-		Context:   tab.SideChat.ParentContext,
 	}
 }

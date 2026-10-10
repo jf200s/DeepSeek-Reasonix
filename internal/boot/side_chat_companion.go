@@ -3,20 +3,19 @@ package boot
 import "strings"
 
 // SideChatParent names the conversation a read-only companion was opened from.
-// Its facts are split by how stable they are: the owner's identity enters the
-// companion's cache-stable system prompt, while what the owner is currently
-// doing rides the session-context snapshot, which is host-authored and replaced
-// per turn. Nothing here may mutate the owner's own prefix or tool schema.
+// Only the owner's stable identity belongs here: it enters the companion's
+// cache-stable system prompt, so a companion always names the conversation it
+// belongs to. What the owner is currently doing arrives per turn as pinned
+// standing context instead, which appends a revision without rewriting that
+// prefix. Nothing here may mutate the owner's own prefix or tool schema.
 type SideChatParent struct {
 	Title     string
 	SessionID string
-	Goal      string
-	Context   string
 }
 
-// appendSideChatCompanionPolicy adds the stable half: which conversation this
-// companion belongs to, and the boundary that comes with it. It is applied once
-// per session, so the prefix stays byte-stable across turns.
+// appendSideChatCompanionPolicy adds which conversation this companion belongs
+// to, and the boundary that comes with it. It is applied once per session, so
+// the prefix stays byte-stable across turns.
 func appendSideChatCompanionPolicy(sysPrompt string, parent *SideChatParent) string {
 	title, sessionID := sideChatParentIdentity(parent)
 	if title == "" && sessionID == "" {
@@ -31,30 +30,6 @@ func appendSideChatCompanionPolicy(sysPrompt string, parent *SideChatParent) str
 	b.WriteString("describe as context. You cannot change the workspace; when a change is needed, say so ")
 	b.WriteString("and let the user make it in the conversation you belong to.")
 	return sysPrompt + "\n\n" + b.String()
-}
-
-// sideChatCompanionContextBlock is the volatile half. It is rendered into the
-// session-context snapshot rather than the system prompt, so a changing owner
-// goal never rewrites the cacheable prefix.
-func sideChatCompanionContextBlock(parent *SideChatParent) string {
-	if parent == nil {
-		return ""
-	}
-	goal, context := strings.TrimSpace(parent.Goal), strings.TrimSpace(parent.Context)
-	if goal == "" && context == "" {
-		return ""
-	}
-	var b strings.Builder
-	b.WriteString("\nCompanion session: you are the read-only companion of the conversation ")
-	b.WriteString(describeSideChatParent(sideChatParentIdentity(parent)))
-	b.WriteString(".")
-	if goal != "" {
-		b.WriteString("\nThat conversation's current goal: " + goal)
-	}
-	if context != "" {
-		b.WriteString("\nThat conversation's recent activity:\n" + context)
-	}
-	return b.String()
 }
 
 func sideChatParentIdentity(parent *SideChatParent) (string, string) {

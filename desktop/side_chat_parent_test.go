@@ -32,7 +32,8 @@ func TestSessionKindForTabNamesCompanions(t *testing.T) {
 }
 
 // TestSideChatParentForBootCarriesOwnerFacts pins the hand-off: boot options see
-// the facts captured at open time, and an ordinary tab offers none.
+// the stable facts captured at open time, and an ordinary tab offers none. The
+// owner's live goal and activity deliberately stay out of boot options.
 func TestSideChatParentForBootCarriesOwnerFacts(t *testing.T) {
 	if sideChatParentForBoot(nil) != nil {
 		t.Fatal("a missing tab has no owner facts")
@@ -44,14 +45,12 @@ func TestSideChatParentForBootCarriesOwnerFacts(t *testing.T) {
 	companion.SideChat.Enabled = true
 	companion.SideChat.ParentTitle = "体素村庄"
 	companion.SideChat.ParentSessionID = "desktop-owner-1"
-	companion.SideChat.ParentGoal = "修好构建"
-	companion.SideChat.ParentContext = "- user: 继续"
 
 	got := sideChatParentForBoot(companion)
 	if got == nil {
 		t.Fatal("a companion must offer its owner facts")
 	}
-	if got.Title != "体素村庄" || got.SessionID != "desktop-owner-1" || got.Goal != "修好构建" || got.Context != "- user: 继续" {
+	if got.Title != "体素村庄" || got.SessionID != "desktop-owner-1" {
 		t.Fatalf("owner facts reached boot options incomplete: %+v", got)
 	}
 }
@@ -82,5 +81,47 @@ func TestSideChatParentContextKeepsOnlyTheOwnersTail(t *testing.T) {
 	}
 	if utf8.RuneCountInString(got) > 7*280 {
 		t.Fatalf("the summary must stay bounded; got %d runes", utf8.RuneCountInString(got))
+	}
+}
+
+// TestSideChatOwnerStandingContextFollowsTheOwner pins the live half of the owner
+// link: a companion reports its owner's current goal and tail, so the text it
+// feeds the standing-context channel changes exactly when the owner moves on.
+func TestSideChatOwnerStandingContextFollowsTheOwner(t *testing.T) {
+	app := &App{tabs: map[string]*WorkspaceTab{}}
+	parent := &WorkspaceTab{ID: "parent"}
+	child := &WorkspaceTab{ID: "child"}
+	child.SideChat.Enabled = true
+	child.SideChat.ParentID = "parent"
+	app.tabs["parent"], app.tabs["child"] = parent, child
+
+	if got := app.sideChatOwnerStandingContext("child"); got != "" {
+		t.Fatalf("an owner without a controller reports nothing; got %q", got)
+	}
+	if got := app.sideChatOwnerStandingContext("parent"); got != "" {
+		t.Fatalf("an ordinary tab reports nothing; got %q", got)
+	}
+	if got := app.sideChatOwnerStandingContext("missing"); got != "" {
+		t.Fatalf("an unknown tab reports nothing; got %q", got)
+	}
+
+	ctrl := newTabScopedActionController()
+	ctrl.goal = "修好构建"
+	ctrl.history = []provider.Message{{Role: provider.RoleUser, Content: "先看构建"}}
+	parent.Ctrl = ctrl
+
+	first := app.sideChatOwnerStandingContext("child")
+	if !strings.Contains(first, "修好构建") || !strings.Contains(first, "先看构建") {
+		t.Fatalf("the companion must report the owner's goal and activity:\n%s", first)
+	}
+
+	ctrl.goal = "改成补测试"
+	ctrl.history = append(ctrl.history, provider.Message{Role: provider.RoleUser, Content: "改主意了"})
+	second := app.sideChatOwnerStandingContext("child")
+	if second == first {
+		t.Fatal("unchanged text would append no revision, so the report must track the owner")
+	}
+	if !strings.Contains(second, "改成补测试") || !strings.Contains(second, "改主意了") {
+		t.Fatalf("the report must carry the owner's latest state:\n%s", second)
 	}
 }

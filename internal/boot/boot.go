@@ -650,7 +650,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	sysPrompt = appendCorePolicies(sysPrompt)
 	sysPrompt += "\n\n" + sessioncontext.PolicyBlock()
 	sysPrompt = appendSideChatCompanionPolicy(sysPrompt, opts.SideChatParent)
-	sessionContextStatic := sessioncontext.Sections{Workspace: currentWorkspacePromptLine(root) + sideChatCompanionContextBlock(opts.SideChatParent)}
+	sessionContextStatic := sessioncontext.Sections{Workspace: currentWorkspacePromptLine(root)}
 	// Execution modes no longer exist. Host obligations are fact-driven and
 	// never rewrite the cache-stable system prefix or tool schemas.
 	if cfg.EnvironmentEnabled() {

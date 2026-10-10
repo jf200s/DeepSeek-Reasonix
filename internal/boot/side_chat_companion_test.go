@@ -56,24 +56,21 @@ model = "x"
 	return systemMessage(reqs[0].Messages), sessionContextMessage(reqs[0].Messages)
 }
 
-// TestBuildSideChatCompanionNamesItsOwner pins both halves of the owner link:
-// the identity in the prefix, the goal and activity in session context.
+// TestBuildSideChatCompanionNamesItsOwner pins the owner link: the companion
+// names the conversation it belongs to in its prefix, and the owner's changing
+// goal and activity stay out of the prefix and the session-context snapshot —
+// they arrive per turn as pinned standing context instead.
 func TestBuildSideChatCompanionNamesItsOwner(t *testing.T) {
 	system, context := companionPrompt(t, "side-chat-companion", &SideChatParent{
 		Title:     "体素村庄",
 		SessionID: "desktop-owner-1",
-		Goal:      "修好构建",
-		Context:   "- user: 继续\n- assistant: 收到",
 	})
 
 	if !strings.Contains(system, "体素村庄") || !strings.Contains(system, "desktop-owner-1") {
 		t.Fatalf("the companion must name its owner conversation in the system prompt:\n%s", system)
 	}
-	if !strings.Contains(context, "修好构建") || !strings.Contains(context, "- user: 继续") {
-		t.Fatalf("the companion's session context must carry the owner's goal and activity:\n%s", context)
-	}
-	if strings.Contains(system, "修好构建") {
-		t.Fatalf("the owner's changing goal must stay out of the cache-stable prefix:\n%s", system)
+	if strings.Contains(context, "Companion session") {
+		t.Fatalf("the owner's live facts must not ride the session-context snapshot:\n%s", context)
 	}
 }
 
@@ -88,25 +85,18 @@ func TestBuildWithoutSideChatParentKeepsThePlainPrompt(t *testing.T) {
 	}
 }
 
-// TestSideChatCompanionHalvesSplitByStability pins the split directly: only the
-// owner's identity reaches the prefix, so a changed goal cannot rewrite it,
-// while the session-context half does change with the owner.
+// TestSideChatCompanionHalvesSplitByStability pins the stability split: only the
+// owner's identity reaches the prefix, so it stays byte-stable per owner, and no
+// owner fact enters session context at all.
 func TestSideChatCompanionHalvesSplitByStability(t *testing.T) {
 	const base = "BASE"
-	first := &SideChatParent{Title: "owner", SessionID: "desktop-owner-2", Goal: "第一个目标", Context: "- user: 甲"}
-	second := &SideChatParent{Title: "owner", SessionID: "desktop-owner-2", Goal: "换了一个目标", Context: "- user: 乙"}
+	owner := &SideChatParent{Title: "owner", SessionID: "desktop-owner-2"}
 
-	if got, want := appendSideChatCompanionPolicy(base, first), appendSideChatCompanionPolicy(base, second); got != want {
-		t.Fatalf("the owner's goal must not reach the prefix:\nfirst:\n%s\nsecond:\n%s", got, want)
+	if got, want := appendSideChatCompanionPolicy(base, owner), appendSideChatCompanionPolicy(base, &SideChatParent{Title: "owner", SessionID: "desktop-owner-2"}); got != want {
+		t.Fatalf("the same owner identity must render the same prefix:\nfirst:\n%s\nsecond:\n%s", got, want)
 	}
-	if strings.Contains(appendSideChatCompanionPolicy(base, first), "第一个目标") {
-		t.Fatal("the prefix must carry identity only")
-	}
-	if got := sideChatCompanionContextBlock(first); !strings.Contains(got, "第一个目标") || !strings.Contains(got, "- user: 甲") {
-		t.Fatalf("session context must carry the owner's goal and activity:\n%s", got)
-	}
-	if sideChatCompanionContextBlock(first) == sideChatCompanionContextBlock(second) {
-		t.Fatal("session context must follow the owner")
+	if appendSideChatCompanionPolicy(base, owner) == appendSideChatCompanionPolicy(base, &SideChatParent{Title: "other", SessionID: "desktop-owner-2"}) {
+		t.Fatal("a different owner must change the prefix")
 	}
 	if got := appendSideChatCompanionPolicy(base, nil); got != base {
 		t.Fatalf("a session without an owner keeps the plain prompt; got:\n%s", got)

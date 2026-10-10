@@ -167,7 +167,12 @@ func pinnedContextIssueReason(err error) agent.PinnedContextIssueReason {
 	}
 }
 
-func pinnedContextLoader(root string) control.PinnedContextLoader {
+// pinnedContextLoader builds the standing-context loader for one tab. A
+// companion tab also reports its owner's live goal and recent activity, so it
+// follows the owner through the pinned revision channel — which appends a
+// revision only when the text actually changes — instead of a fixed snapshot the
+// host would have to re-send on every request.
+func pinnedContextLoader(app *App, root, tabID string) control.PinnedContextLoader {
 	return func(ctx context.Context, target control.PinnedContextTarget) (agent.PinnedContextSnapshot, error) {
 		if err := ctx.Err(); err != nil {
 			return agent.PinnedContextSnapshot{}, err
@@ -177,10 +182,20 @@ func pinnedContextLoader(root string) control.PinnedContextLoader {
 			return agent.PinnedContextSnapshot{}, err
 		}
 		build := buildPinnedContext(root, state.Files)
+		snapshot := build.Snapshot
+		if standing := app.sideChatOwnerStandingContext(tabID); standing != "" {
+			note, noteErr := agent.NormalizePinnedContextFile(agent.PinnedContextFile{
+				Path:    sideChatOwnerStandingContextPath,
+				Content: standing,
+			})
+			if noteErr == nil {
+				snapshot.Files = append(append([]agent.PinnedContextFile(nil), snapshot.Files...), note)
+			}
+		}
 		if err := ctx.Err(); err != nil {
 			return agent.PinnedContextSnapshot{}, err
 		}
-		return build.Snapshot, nil
+		return snapshot, nil
 	}
 }
 
