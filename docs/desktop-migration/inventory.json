@@ -101,7 +101,7 @@
       "kind": "command",
       "name": "ActivateTopic",
       "detail": "(scope string, workspaceRoot string, topicID string, sessionPath string) (TabMeta, error)",
-      "location": "desktop/tabs.go:2567",
+      "location": "desktop/tabs.go:2587",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -325,7 +325,7 @@
       "kind": "command",
       "name": "ArchiveSessionTarget",
       "detail": "(selector SessionSelector) (SessionMutationResult, error)",
-      "location": "desktop/session_operations.go:198",
+      "location": "desktop/session_operations.go:224",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -819,9 +819,17 @@
     },
     {
       "kind": "command",
+      "name": "CloseSideChatTab",
+      "detail": "(tabID string) error",
+      "location": "desktop/side_chat.go:91",
+      "class": "keep-business",
+      "owner": "hostrpc desktop/invoke"
+    },
+    {
+      "kind": "command",
       "name": "CloseTab",
       "detail": "(tabID string) error",
-      "location": "desktop/tabs.go:3111",
+      "location": "desktop/tabs.go:3131",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -941,7 +949,7 @@
       "kind": "command",
       "name": "ContextPanel",
       "detail": "(tabID string) ContextPanelInfo",
-      "location": "desktop/tabs.go:6705",
+      "location": "desktop/tabs.go:6727",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1053,7 +1061,7 @@
       "kind": "command",
       "name": "CreateTopic",
       "detail": "(scope string, workspaceRoot string, title string) (TopicMeta, error)",
-      "location": "desktop/tabs.go:6224",
+      "location": "desktop/tabs.go:6246",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1085,7 +1093,7 @@
       "kind": "command",
       "name": "DeleteInboxItem",
       "detail": "(tabID string, id string) error",
-      "location": "desktop/inbox_app.go:424",
+      "location": "desktop/inbox_app.go:422",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1133,7 +1141,7 @@
       "kind": "command",
       "name": "DeleteSessionTarget",
       "detail": "(selector SessionSelector) (SessionMutationResult, error)",
-      "location": "desktop/session_operations.go:363",
+      "location": "desktop/session_operations.go:389",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1301,7 +1309,7 @@
       "kind": "command",
       "name": "EnsureBlankSurface",
       "detail": "(scope string, workspaceRoot string) (TabMeta, error)",
-      "location": "desktop/tabs.go:2602",
+      "location": "desktop/tabs.go:2622",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1309,7 +1317,7 @@
       "kind": "command",
       "name": "EnsureBlankTab",
       "detail": "(scope string, workspaceRoot string) (TabMeta, error)",
-      "location": "desktop/tabs.go:2645",
+      "location": "desktop/tabs.go:2665",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1621,7 +1629,7 @@
       "kind": "command",
       "name": "GetPinnedFilesForTab",
       "detail": "(tabID string) ([]PinnedFileInfo, error)",
-      "location": "desktop/pinned_files.go:423",
+      "location": "desktop/pinned_files.go:438",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -1685,7 +1693,7 @@
       "kind": "command",
       "name": "GetSessionCatalogStatus",
       "detail": "() SessionCatalogStatus",
-      "location": "desktop/session_catalog_runtime.go:640",
+      "location": "desktop/session_catalog_runtime.go:652",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2005,7 +2013,7 @@
       "kind": "command",
       "name": "InboxHasItems",
       "detail": "(tabID string) (bool, error)",
-      "location": "desktop/inbox_app.go:498",
+      "location": "desktop/inbox_app.go:496",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2189,7 +2197,7 @@
       "kind": "command",
       "name": "ListProjectTree",
       "detail": "() ([]ProjectNode, error)",
-      "location": "desktop/session_catalog_runtime.go:647",
+      "location": "desktop/session_catalog_runtime.go:659",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2253,7 +2261,7 @@
       "kind": "command",
       "name": "ListTabs",
       "detail": "() []TabMeta",
-      "location": "desktop/tabs.go:2245",
+      "location": "desktop/tabs.go:2265",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2581,7 +2589,7 @@
       "kind": "command",
       "name": "MoveInboxItem",
       "detail": "(tabID string, id string, toIndex int) error",
-      "location": "desktop/inbox_app.go:437",
+      "location": "desktop/inbox_app.go:435",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2589,7 +2597,7 @@
       "kind": "command",
       "name": "MoveSessionTarget",
       "detail": "(selector SessionSelector, workspaceID string, beforeSessionID string) (SessionMutationResult, error)",
-      "location": "desktop/session_operations.go:309",
+      "location": "desktop/session_operations.go:335",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2677,7 +2685,7 @@
       "kind": "command",
       "name": "OpenGlobalTab",
       "detail": "(topicID string) (TabMeta, error)",
-      "location": "desktop/tabs.go:2458",
+      "location": "desktop/tabs.go:2478",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2709,7 +2717,7 @@
       "kind": "command",
       "name": "OpenProjectTab",
       "detail": "(workspaceRoot string, topicID string) (TabMeta, error)",
-      "location": "desktop/tabs.go:2295",
+      "location": "desktop/tabs.go:2315",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2763,6 +2771,14 @@
     },
     {
       "kind": "command",
+      "name": "OpenSideChatForTab",
+      "detail": "(parentTabID string) (SideChatOpenResult, error)",
+      "location": "desktop/side_chat.go:38",
+      "class": "keep-business",
+      "owner": "hostrpc desktop/invoke"
+    },
+    {
+      "kind": "command",
       "name": "OpenTaskSessionByKey",
       "detail": "(req TaskOpenRequest) (taskmonitor.ControlResult, error)",
       "location": "desktop/task_catalog.go:283",
@@ -2781,7 +2797,7 @@
       "kind": "command",
       "name": "OpenTopicSession",
       "detail": "(scope string, workspaceRoot string, topicID string, sessionPath string) (TabMeta, error)",
-      "location": "desktop/tabs.go:2478",
+      "location": "desktop/tabs.go:2498",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -2901,7 +2917,7 @@
       "kind": "command",
       "name": "PinFileForTab",
       "detail": "(tabID string, relPath string) (PinnedFileInfo, error)",
-      "location": "desktop/pinned_files.go:401",
+      "location": "desktop/pinned_files.go:416",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3069,7 +3085,7 @@
       "kind": "command",
       "name": "ReadInboxItem",
       "detail": "(tabID string, id string) (InboxEnvelopeView, error)",
-      "location": "desktop/inbox_app.go:393",
+      "location": "desktop/inbox_app.go:391",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3253,7 +3269,7 @@
       "kind": "command",
       "name": "RefreshInboxItem",
       "detail": "(tabID string, id string) error",
-      "location": "desktop/inbox_app.go:476",
+      "location": "desktop/inbox_app.go:474",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3669,7 +3685,7 @@
       "kind": "command",
       "name": "RenameProject",
       "detail": "(workspaceRoot string, title string) error",
-      "location": "desktop/tabs.go:6258",
+      "location": "desktop/tabs.go:6280",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3717,7 +3733,7 @@
       "kind": "command",
       "name": "RenameSessionTarget",
       "detail": "(selector SessionSelector, title string) (SessionMutationResult, error)",
-      "location": "desktop/session_operations.go:109",
+      "location": "desktop/session_operations.go:135",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3733,7 +3749,7 @@
       "kind": "command",
       "name": "RenameTopic",
       "detail": "(topicID string, title string) error",
-      "location": "desktop/tabs.go:6368",
+      "location": "desktop/tabs.go:6390",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3749,7 +3765,7 @@
       "kind": "command",
       "name": "ReorderProjects",
       "detail": "(workspaceRoots []string) error",
-      "location": "desktop/tabs.go:6314",
+      "location": "desktop/tabs.go:6336",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -3765,7 +3781,7 @@
       "kind": "command",
       "name": "ReorderTabs",
       "detail": "(tabIDs []string) error",
-      "location": "desktop/tabs.go:3055",
+      "location": "desktop/tabs.go:3075",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -4101,7 +4117,7 @@
       "kind": "command",
       "name": "RestoreSessionTarget",
       "detail": "(selector SessionSelector) (SessionMutationResult, error)",
-      "location": "desktop/session_operations.go:245",
+      "location": "desktop/session_operations.go:271",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -4181,7 +4197,7 @@
       "kind": "command",
       "name": "RetryInboxItem",
       "detail": "(tabID string, id string) error",
-      "location": "desktop/inbox_app.go:463",
+      "location": "desktop/inbox_app.go:461",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5077,7 +5093,7 @@
       "kind": "command",
       "name": "SetInboxPaused",
       "detail": "(tabID string, paused bool) error",
-      "location": "desktop/inbox_app.go:450",
+      "location": "desktop/inbox_app.go:448",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5213,7 +5229,7 @@
       "kind": "command",
       "name": "SetProjectColor",
       "detail": "(workspaceRoot string, color string) error",
-      "location": "desktop/tabs.go:6269",
+      "location": "desktop/tabs.go:6291",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5221,7 +5237,7 @@
       "kind": "command",
       "name": "SetProjectPinned",
       "detail": "(workspaceRoot string, pinned bool) error",
-      "location": "desktop/tabs.go:6280",
+      "location": "desktop/tabs.go:6302",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5509,7 +5525,7 @@
       "kind": "command",
       "name": "SetTopicPinned",
       "detail": "(topicID string, pinned bool) error",
-      "location": "desktop/tabs.go:6556",
+      "location": "desktop/tabs.go:6578",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5741,7 +5757,7 @@
       "kind": "command",
       "name": "SubmitDeliveryRecoveryToTabWithID",
       "detail": "(tabID string, display string, input string, submissionID string) error",
-      "location": "desktop/turn_submission_app.go:223",
+      "location": "desktop/turn_submission_app.go:231",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5765,7 +5781,7 @@
       "kind": "command",
       "name": "SubmitDisplayToTabWithID",
       "detail": "(tabID string, display string, input string, submissionID string) error",
-      "location": "desktop/turn_submission_app.go:195",
+      "location": "desktop/turn_submission_app.go:203",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5781,7 +5797,7 @@
       "kind": "command",
       "name": "SubmitEditedDisplayToTabWithID",
       "detail": "(tabID string, display string, input string, original string, submissionID string) error",
-      "location": "desktop/turn_submission_app.go:292",
+      "location": "desktop/turn_submission_app.go:300",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5813,7 +5829,7 @@
       "kind": "command",
       "name": "SubmitInitialGoalToTabWithID",
       "detail": "(tabID string, goal string, display string, input string, invocations []InvocationRequest, collaborationMode string, toolApprovalMode string, submissionID string) ([]string, error)",
-      "location": "desktop/turn_submission_app.go:279",
+      "location": "desktop/turn_submission_app.go:287",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5829,7 +5845,7 @@
       "kind": "command",
       "name": "SubmitInvocationsToTabWithID",
       "detail": "(tabID string, display string, input string, invocations []InvocationRequest, submissionID string) error",
-      "location": "desktop/turn_submission_app.go:251",
+      "location": "desktop/turn_submission_app.go:259",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -5885,7 +5901,7 @@
       "kind": "command",
       "name": "SubmitToTabWithID",
       "detail": "(tabID string, input string, submissionID string) error",
-      "location": "desktop/turn_submission_app.go:188",
+      "location": "desktop/turn_submission_app.go:196",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -6117,7 +6133,7 @@
       "kind": "command",
       "name": "UnpinFileForTab",
       "detail": "(tabID string, relPath string) error",
-      "location": "desktop/pinned_files.go:412",
+      "location": "desktop/pinned_files.go:427",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -6125,7 +6141,7 @@
       "kind": "command",
       "name": "UpdateInboxItem",
       "detail": "(tabID string, id string, display string, submit string) error",
-      "location": "desktop/inbox_app.go:411",
+      "location": "desktop/inbox_app.go:409",
       "class": "keep-business",
       "owner": "hostrpc desktop/invoke"
     },
@@ -6361,7 +6377,7 @@
     {
       "kind": "event",
       "name": "runtime:rebuilt",
-      "location": "desktop/tabs.go:1823",
+      "location": "desktop/tabs.go:1840",
       "class": "keep-business",
       "owner": "desktop/event frame (seq + generation), same payload"
     },
@@ -6375,7 +6391,7 @@
     {
       "kind": "event",
       "name": "session:recovered",
-      "location": "desktop/tabs.go:5889",
+      "location": "desktop/tabs.go:5911",
       "class": "keep-business",
       "owner": "desktop/event frame (seq + generation), same payload"
     },
@@ -6556,6 +6572,13 @@
     },
     {
       "kind": "persistence",
+      "name": "desktop-debug.log",
+      "location": "desktop/pprof_debug.go:22",
+      "class": "keep-business",
+      "owner": "format unchanged; read by both shells"
+    },
+    {
+      "kind": "persistence",
       "name": "desktop-remote.json",
       "location": "desktop/remote_prefs.go:39",
       "class": "keep-business",
@@ -6585,7 +6608,7 @@
     {
       "kind": "persistence",
       "name": "downloaded.json",
-      "location": "desktop/updater.go:541",
+      "location": "desktop/updater.go:540",
       "class": "keep-business",
       "owner": "format unchanged; read by both shells"
     },

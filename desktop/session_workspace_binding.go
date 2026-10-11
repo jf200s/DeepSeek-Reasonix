@@ -43,8 +43,9 @@ func (a *App) bindTabCanonicalSessionTopic(
 	scope, workspaceRoot, sessionID, legacyPath, model string,
 	modelFallback bool,
 	topicID, seedTitle string,
+	kind session.SessionKind,
 ) (canonicalTabBinding, error) {
-	ref, workspaceID, err := a.bindTabCanonicalSession(ctx, identity, cfg, scope, workspaceRoot, sessionID, legacyPath, model, modelFallback)
+	ref, workspaceID, err := a.bindTabCanonicalSession(ctx, identity, cfg, scope, workspaceRoot, sessionID, legacyPath, model, modelFallback, kind)
 	if err != nil {
 		return canonicalTabBinding{}, err
 	}

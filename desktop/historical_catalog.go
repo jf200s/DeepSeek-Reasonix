@@ -224,7 +224,7 @@ func readHistoricalCanonicalCatalog(ctx context.Context, sources map[string]hist
 		bytes += metadataBytes
 		node := historicalCatalogPlaceholder(key, source).node
 		if info, err := session.NewFilesystemPersistence(filepath.Dir(source.path)).Stat(ctx, filepath.Base(source.path)); err == nil {
-			if info.Kind == session.SessionKindHeadlessRun {
+			if info.Kind == session.SessionKindHeadlessRun || info.Kind == session.SessionKindSideChat {
 				delete(sources, key)
 				continue
 			}

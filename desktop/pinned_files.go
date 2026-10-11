@@ -167,20 +167,35 @@ func pinnedContextIssueReason(err error) agent.PinnedContextIssueReason {
 	}
 }
 
-func pinnedContextLoader(root string) control.PinnedContextLoader {
-	return func(ctx context.Context, sessionPath string) (agent.PinnedContextSnapshot, error) {
+// pinnedContextLoader builds the standing-context loader for one tab. A
+// companion tab also reports its owner's live goal and recent activity, so it
+// follows the owner through the pinned revision channel — which appends a
+// revision only when the text actually changes — instead of a fixed snapshot the
+// host would have to re-send on every request.
+func pinnedContextLoader(app *App, root, tabID string) control.PinnedContextLoader {
+	return func(ctx context.Context, target control.PinnedContextTarget) (agent.PinnedContextSnapshot, error) {
 		if err := ctx.Err(); err != nil {
 			return agent.PinnedContextSnapshot{}, err
 		}
-		state, err := loadPinnedContextState(sessionPath)
+		state, err := pinnedContextLoad(target.SessionID, target.Path)
 		if err != nil {
 			return agent.PinnedContextSnapshot{}, err
 		}
 		build := buildPinnedContext(root, state.Files)
+		snapshot := build.Snapshot
+		if standing := app.sideChatOwnerStandingContext(tabID); standing != "" {
+			note, noteErr := agent.NormalizePinnedContextFile(agent.PinnedContextFile{
+				Path:    sideChatOwnerStandingContextPath,
+				Content: standing,
+			})
+			if noteErr == nil {
+				snapshot.Files = append(append([]agent.PinnedContextFile(nil), snapshot.Files...), note)
+			}
+		}
 		if err := ctx.Err(); err != nil {
 			return agent.PinnedContextSnapshot{}, err
 		}
-		return build.Snapshot, nil
+		return snapshot, nil
 	}
 }
 
@@ -344,8 +359,8 @@ func (a *App) mutatePinnedFiles(tabID, relPath string, pin bool) (PinnedFileInfo
 	if ctrl.RuntimeStatus().Running {
 		return PinnedFileInfo{}, "", control.ErrTurnRunning
 	}
-	sessionPath := ctrl.SessionPath()
-	state, err := loadPinnedContextState(sessionPath)
+	sessionID, sessionPath := tab.SessionID, ctrl.SessionPath()
+	state, err := pinnedContextLoad(sessionID, sessionPath)
 	if err != nil {
 		return PinnedFileInfo{}, "", err
 	}
@@ -390,7 +405,7 @@ func (a *App) mutatePinnedFiles(tabID, relPath string, pin bool) (PinnedFileInfo
 		}
 	}
 	if candidateChanged := strings.Join(oldFiles, "\x00") != strings.Join(candidate, "\x00"); candidateChanged {
-		if err := savePinnedContextState(sessionPath, candidate); err != nil {
+		if err := pinnedContextSave(sessionID, sessionPath, candidate); err != nil {
 			return PinnedFileInfo{}, "", err
 		}
 	}
@@ -436,7 +451,7 @@ func (a *App) GetPinnedFilesForTab(tabID string) ([]PinnedFileInfo, error) {
 	if ctrl == nil {
 		return []PinnedFileInfo{}, a.workspaceNotReadyErr(tab)
 	}
-	state, err := loadPinnedContextState(ctrl.SessionPath())
+	state, err := pinnedContextLoad(tab.SessionID, ctrl.SessionPath())
 	if err != nil {
 		return []PinnedFileInfo{}, err
 	}

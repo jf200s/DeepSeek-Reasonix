@@ -96,21 +96,34 @@ type WorkspaceTab struct {
 	persistenceExtra         map[string]json.RawMessage // unknown desktop-tabs.json fields retained across rewrites
 	SessionGeneration        uint64                     // bumps on session rotation (clear/new); frontend hydrate identity
 	ReadOnly                 bool                       // true for external channel transcripts opened for browsing
-	Takeover                 struct{ Spectator bool }   // handoff state grouped by its cross-runtime lifetime
-	Ctrl                     control.SessionAPI         // nil while booting / on error
-	Label                    string                     // model label (for the tab badge)
-	Ready                    bool                       // true once boot.Build completes
-	StartupErr               string                     // build error, surfaced to the frontend
-	HistoricalSource         *SessionSourceRef          // immutable, pending explicit preparation after restore
-	StartupErrLeaseHeld      bool                       // true when StartupErr can be retried after a session lease releases
-	modelApplication         tabModelApplicationState   // guarded by App.mu; never persisted
-	runtimeID                string                     // process-local SessionRuntime registry identity
-	sessionLease             *agent.SessionLease
-	sessionLeaseMu           sync.Mutex
-	sessionLeaseKey          atomic.Pointer[string] // lock-free mirror; updated with sessionLease under sessionLeaseMu
-	sink                     *tabEventSink          // routes events with this tab's ID
-	buildCancel              context.CancelFunc     // cancels in-flight boot for tabs removed before Ready
-	buildGeneration          uint64                 // identifies the current in-flight build
+	// SideChat groups the companion-session facts: a side-chat tab is a
+	// process-local, read-only session owned by another tab. The Parent* fields
+	// are the owner's stable facts captured when the companion opened, so the
+	// companion's prompt can name the conversation it belongs to even after the
+	// owner changes or closes. The owner's live goal and recent activity stay out
+	// of them: those arrive per turn as standing context.
+	SideChat struct {
+		Enabled         bool
+		ParentID        string
+		Ordinal         int
+		ParentTitle     string
+		ParentSessionID string
+	}
+	Takeover            struct{ Spectator bool } // handoff state grouped by its cross-runtime lifetime
+	Ctrl                control.SessionAPI       // nil while booting / on error
+	Label               string                   // model label (for the tab badge)
+	Ready               bool                     // true once boot.Build completes
+	StartupErr          string                   // build error, surfaced to the frontend
+	HistoricalSource    *SessionSourceRef        // immutable, pending explicit preparation after restore
+	StartupErrLeaseHeld bool                     // true when StartupErr can be retried after a session lease releases
+	modelApplication    tabModelApplicationState // guarded by App.mu; never persisted
+	runtimeID           string                   // process-local SessionRuntime registry identity
+	sessionLease        *agent.SessionLease
+	sessionLeaseMu      sync.Mutex
+	sessionLeaseKey     atomic.Pointer[string] // lock-free mirror; updated with sessionLease under sessionLeaseMu
+	sink                *tabEventSink          // routes events with this tab's ID
+	buildCancel         context.CancelFunc     // cancels in-flight boot for tabs removed before Ready
+	buildGeneration     uint64                 // identifies the current in-flight build
 	// buildDone is closed exactly once when the build that owns buildDoneGen
 	// terminates (success, failure, or superseded abandon). Topic-activation
 	// completions wait on it to learn that the controller build finished
@@ -2177,6 +2190,8 @@ func (a *App) tabMeta(tab *WorkspaceTab, active bool) TabMeta {
 		SessionDigest:     sessionDigest,
 		SessionGeneration: tab.SessionGeneration,
 		ReadOnly:          tab.ReadOnly,
+		SideChat:          tab.SideChat.Enabled,
+		ParentTabID:       tab.SideChat.ParentID,
 		TakenOver:         tab.Takeover.Spectator,
 		Label:             tab.Label,
 		Ready:             runtimeView.Phase == sessionRuntimeReady && tab.Ctrl != nil,
@@ -3114,6 +3129,7 @@ func (a *App) ReorderTabs(tabIDs []string) error {
 // background work, the controller is detached so closing a view does not destroy
 // the session runtime.
 func (a *App) CloseTab(tabID string) error {
+	a.closeSideChatChildren(tabID)
 	return a.closeTab(tabID, true)
 }
 
@@ -3683,6 +3699,9 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	buildDisabledMCP := cloneServerViewMap(tab.disabledMCP)
 	buildGoal := tab.goal
 	buildSink := tab.sink
+	// A companion is built through this path, not through sessionOpenBootOptions,
+	// so its read-only boundary and owner facts must be captured here too.
+	buildReadOnly, buildSideChatParent := sideChatBootFields(tab)
 	a.saveTabsLocked()
 	a.mu.Unlock()
 	buildRuntime := (tabRuntimeSnapshot{
@@ -3707,6 +3726,8 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	booted := a.bootTabControllerWithModelFallback(buildCtx, tab, cfg, sharedHost, boot.Options{
 		Model:                model,
 		RequireKey:           false,
+		ReadOnlySession:      buildReadOnly,
+		SideChatParent:       buildSideChatParent,
 		StatsSource:          "desktop",
 		TaskStore:            a.taskStore(),
 		OnConfigLoadWarnings: a.configLoadWarningsHandler(),
@@ -3720,7 +3741,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		PinnedContextLoader:      pinnedContextLoader(root),
+		PinnedContextLoader:      pinnedContextLoader(a, root, tab.ID),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 		OnSessionTransition:      a.handleTabSessionTransition(tab),
 		BeforeInboxDispatch:      a.beforeInboxDispatch,
@@ -3763,6 +3784,7 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	} else if usesExclusiveV3 && identity.UsesExclusiveSession() {
 		bound, bindErr := a.bindTabCanonicalSessionTopic(
 			buildCtx, identity, cfg, tabScope, tabWorkspaceRoot, tabSessionID, startupSessionPath, model, modelFallback, tabTopicID, tabSeedTitle,
+			sessionKindForTab(tab),
 		)
 		if bindErr != nil {
 			a.recordTabStartupFailure(tab, buildGeneration, appCtx, friendlySessionLoadError(bindErr))
@@ -4084,7 +4106,7 @@ func (a *App) applySessionBindingToTab(tab *WorkspaceTab, binding sessionBinding
 	if topicID != "" {
 		topicSource = loadTopicTitleSource(topicTitleRoot(scope, workspaceRoot), topicID)
 	}
-	pinnedState, preservePendingLegacy := pinnedContextStateForSessionBinding(tab, binding.path)
+	pinnedState, preservePendingLegacy := pinnedContextStateForSessionBinding(tab, tab.SessionID, binding.path)
 
 	a.mu.Lock()
 	current := a.tabs[tab.ID]
@@ -4772,7 +4794,7 @@ func (a *App) saveTabsCollectLocked() (string, []desktopTabEntry, string, uint64
 	var entries []desktopTabEntry
 	for _, id := range a.orderedTabIDsLocked() {
 		if tab := a.tabs[id]; tab != nil {
-			if a.suppressTabStartupRestoreLocked(tab) {
+			if a.suppressTabStartupRestoreLocked(tab) || tab.SideChat.Enabled {
 				continue
 			}
 			entries = append(entries, persistedDesktopTabEntry(tab))
@@ -7587,7 +7609,7 @@ func (a *App) persistTabSessionPath(tab *WorkspaceTab, path string) {
 	// A tab restored from the short-lived tab-scoped implementation may not
 	// have had a session path when startup loaded its legacy pins. Publish that
 	// one-time migration before reconcile loads the new session-owned sidecar.
-	migratePendingLegacyPinnedFiles(tab, path)
+	migratePendingLegacyPinnedFiles(tab, tab.SessionID, path)
 	if reconciled, ok := a.reconcileTabWithSessionPath(tab, path); ok {
 		path = canonicalTabSessionPath(reconciled)
 	}

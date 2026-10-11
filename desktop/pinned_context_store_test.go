@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -132,7 +133,7 @@ func TestFailedLegacyMigrationRemainsRoundTrippable(t *testing.T) {
 	if err := os.MkdirAll(blockedParent, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	migratePendingLegacyPinnedFiles(tab, sessionPath)
+	migratePendingLegacyPinnedFiles(tab, "", sessionPath)
 	if pending := tab.pendingLegacyPinnedFilesForPersistence(); len(pending) != 0 {
 		t.Fatalf("pending legacy pins after migration = %v", pending)
 	}
@@ -156,5 +157,92 @@ func TestPathlessLegacyPinsRemainRoundTrippable(t *testing.T) {
 	}
 	if pending := tab.pendingLegacyPinnedFilesForPersistence(); len(pending) != 0 {
 		t.Fatalf("pending legacy pins after startup migration = %v", pending)
+	}
+}
+
+// isolatePinnedContextHome points the v5 store at a temp home so a canonical
+// sidecar can be created without touching the real session tree.
+func isolatePinnedContextHome(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	t.Setenv("REASONIX_HOME", home)
+	t.Setenv("REASONIX_STATE_HOME", "")
+	return home
+}
+
+func TestCanonicalPinnedContextUsesTheV5Sidecar(t *testing.T) {
+	home := isolatePinnedContextHome(t)
+	sessionID := "desktop-canonical123"
+
+	if err := savePinnedContextStateForSession(sessionID, []string{"docs/b.md", "docs/a.md"}); err != nil {
+		t.Fatalf("save canonical: %v", err)
+	}
+	sidecar := pinnedContextSidecarForSession(sessionID)
+	want := filepath.Join(home, "desktop-sessions-v5", "by-id", sessionID, store.PinnedContextSidecarName)
+	if sidecar != want {
+		t.Fatalf("canonical sidecar = %q, want %q", sidecar, want)
+	}
+	state, err := loadPinnedContextStateForSession(sessionID)
+	if err != nil {
+		t.Fatalf("load canonical: %v", err)
+	}
+	if state.SessionID != sessionID || !reflect.DeepEqual(state.Files, []string{"docs/a.md", "docs/b.md"}) {
+		t.Fatalf("canonical state = %+v", state)
+	}
+	legacy := store.SessionPinnedContext(filepath.Join(home, sessionID))
+	if _, err := os.Stat(legacy); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("canonical save also wrote a legacy sibling sidecar %q", legacy)
+	}
+}
+
+func TestCanonicalPinnedContextReadsOnlyItsOwnSidecar(t *testing.T) {
+	isolatePinnedContextHome(t)
+	sidecar := pinnedContextSidecarForSession("desktop-owner")
+	if err := os.MkdirAll(filepath.Dir(sidecar), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	raw := `{"schemaVersion":1,"sessionId":"desktop-other","files":["docs/a.md"]}`
+	if err := os.WriteFile(sidecar, []byte(raw), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := loadPinnedContextStateForSession("desktop-owner"); err == nil {
+		t.Fatal("a sidecar owned by another session was accepted")
+	}
+}
+
+func TestPinnedContextIdentityPrefersTheCanonicalSession(t *testing.T) {
+	isolatePinnedContextHome(t)
+	legacyPath := filepath.Join(t.TempDir(), "session.jsonl")
+	if err := savePinnedContextState(legacyPath, []string{"legacy.md"}); err != nil {
+		t.Fatalf("save legacy: %v", err)
+	}
+	if err := savePinnedContextStateForSession("desktop-canonical", []string{"canonical.md"}); err != nil {
+		t.Fatalf("save canonical: %v", err)
+	}
+
+	// Both identities resolve, and neither one shadows the other's sidecar.
+	canonical, err := pinnedContextLoad("desktop-canonical", legacyPath)
+	if err != nil {
+		t.Fatalf("load by canonical identity: %v", err)
+	}
+	if !reflect.DeepEqual(canonical.Files, []string{"canonical.md"}) {
+		t.Fatalf("canonical files = %v", canonical.Files)
+	}
+	legacy, err := pinnedContextLoad("", legacyPath)
+	if err != nil {
+		t.Fatalf("load by legacy identity: %v", err)
+	}
+	if !reflect.DeepEqual(legacy.Files, []string{"legacy.md"}) {
+		t.Fatalf("legacy files = %v", legacy.Files)
+	}
+	if err := pinnedContextSave("desktop-canonical", legacyPath, []string{"updated.md"}); err != nil {
+		t.Fatalf("save by canonical identity: %v", err)
+	}
+	reloaded, err := loadPinnedContextState(legacyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(reloaded.Files, []string{"legacy.md"}) {
+		t.Fatalf("canonical write changed the legacy sidecar: %v", reloaded.Files)
 	}
 }

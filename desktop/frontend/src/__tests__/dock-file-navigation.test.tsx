@@ -26,7 +26,7 @@ const { dom, root } = await renderFilesWorkspace({
   ResolveRemotePresentedPathForTab: async (_tab, _host, _tool, path) => path,
 });
 const props: WorkspaceDockRegionProps = {
-  visible: false, overlay: false, mode: "files", showContext: false,
+  visible: false, overlay: false, mode: "files", showContext: false, parentSessionId: "",
   t: key => key, onPickEntry: () => {}, remote: { onClose: () => {} }, context: {} as WorkspaceDockRegionProps["context"],
   workspace: { open: true, tabId: "navigation-session", cwd: "/repo", maximized: false, onClose: () => {}, onToggleMaximized: () => {} },
   workspaceKey: "navigation-test", workspaceRoot: "/repo",

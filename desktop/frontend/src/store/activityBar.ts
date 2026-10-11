@@ -11,7 +11,7 @@
 
 import { create } from "zustand";
 
-export type TabType = "file" | "changed" | "context" | "remote" | "browser";
+export type TabType = "file" | "changed" | "context" | "remote" | "browser" | "sideChat";
 
 export interface TabItem {
   id: string;
@@ -58,6 +58,10 @@ function loadTabs(): { tabs: TabItem[]; activeTabId: string | null } {
     const seen = new Set<string>();
     const valid = tabs.filter((tab) => {
       if (!tab || typeof tab.id !== "string" || typeof tab.type !== "string") return false;
+      // A side-chat tab wraps a live companion session that cannot outlive the
+      // app, so a snapshot carrying one is stale: drop it instead of restoring
+      // a tab whose session no longer exists.
+      if (tab.type === "sideChat") return false;
       if (seen.has(tab.id)) return false;
       seen.add(tab.id);
       return true;
@@ -68,10 +72,17 @@ function loadTabs(): { tabs: TabItem[]; activeTabId: string | null } {
   }
 }
 
+// Side-chat tabs are session-local: their companion session cannot outlive the
+// process, so they never enter the persisted snapshot. The ordinary tabs keep
+// round-tripping, and side chats are recreated on demand instead of restored.
+function persistableTabs(tabs: TabItem[]): TabItem[] {
+  return tabs.filter((tab) => tab.type !== "sideChat");
+}
+
 function persist(tabs: TabItem[], activeTabId: string | null): void {
   if (typeof window === "undefined") return;
   try {
-    window.localStorage.setItem(storageKey(), JSON.stringify({ tabs, activeTabId }));
+    window.localStorage.setItem(storageKey(), JSON.stringify({ tabs: persistableTabs(tabs), activeTabId }));
   } catch {
     /* ignore storage failures */
   }

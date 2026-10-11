@@ -418,7 +418,9 @@ func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 	if req.readAvailability != nil {
 		availability = *req.readAvailability
 	} else {
+		availDone := debugTickPhase("list-topics:availability:" + req.WorkspaceRoot)
 		availability = a.catalogWorkspaceAvailability(catalog, req.Scope, req.WorkspaceRoot, req.readContext)
+		availDone()
 	}
 	if !availability.usable {
 		// A freshly opened catalog cache is live but empty until the first directory
@@ -431,7 +433,9 @@ func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 		page = availability.decorate(page, catalog.Status().Revision)
 		return a.withLiveTopics(catalog, req, page), nil
 	}
+	pageDone := debugTickPhase("list-topics:catalog-page:" + req.WorkspaceRoot)
 	page, err := a.catalogTopicPage(catalog, req)
+	pageDone()
 	if err != nil {
 		return page, err
 	}
@@ -440,12 +444,16 @@ func (a *App) listProjectTopics(req ProjectTopicPageRequest) (ProjectTopicPage, 
 	// retaining metadata-only shells would resurrect recovery copies or deleted
 	// sessions that the completed scan deliberately folded/removed.
 	if !availability.complete {
+		mergeDone := debugTickPhase("list-topics:merge-metadata:" + req.WorkspaceRoot)
 		page, err = a.mergeMetadataTopics(req, page)
+		mergeDone()
 		if err != nil {
 			return page, err
 		}
 	}
 	page = availability.decorate(page, max(page.Revision, catalog.Status().Revision))
+	liveDone := debugTickPhase("list-topics:live:" + req.WorkspaceRoot)
+	defer liveDone()
 	return a.withLiveTopics(catalog, req, page), nil
 }
 
@@ -572,7 +580,9 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 	}
 	// Workspace-wide preference collapses cross-topic recovery replicas that
 	// share a lineage but were indexed as separate topic rows.
+	prefDone := debugTickPhase("catalog-page:preferred:" + req.WorkspaceRoot)
 	preferred, prefErr := catalog.PreferredOrdinarySessionPaths(ctx, req.Scope, req.WorkspaceRoot)
+	prefDone()
 	if prefErr != nil {
 		preferred = nil
 	}
@@ -581,6 +591,7 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 	// sidebar never shows an empty "no sessions" state when later pages still
 	// have ordinary topics.
 	for {
+		listDone := debugTickPhase("catalog-page:list-topics:" + req.WorkspaceRoot)
 		page, err := catalog.ListTopics(ctx, sessioncatalog.TopicPageRequest{
 			Scope: req.Scope, WorkspaceRoot: req.WorkspaceRoot, Cursor: cursor,
 			Limit: limit, Query: req.Query, TimeFilter: req.TimeFilter, SortMode: req.SortMode,
@@ -589,6 +600,7 @@ func (a *App) catalogTopicPage(catalog *sessioncatalog.Catalog, req ProjectTopic
 			PinnedOnly:    req.pinnedOnly,
 			CursorBinding: req.groupCursorBind,
 		})
+		listDone()
 		if err != nil {
 			return out, err
 		}

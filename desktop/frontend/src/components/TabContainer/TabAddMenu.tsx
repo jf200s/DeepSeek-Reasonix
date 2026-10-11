@@ -7,7 +7,7 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import type { RefObject } from "react";
 import { useT } from "../../lib/i18n";
-import { Activity, Compass, FileDiff, FileText } from "lucide-react";
+import { Activity, Compass, FileDiff, FileText, MessageSquareText } from "lucide-react";
 import type { ComponentType } from "react";
 import { desktopHost } from "../../lib/desktopHost";
 import type { TabType } from "../../store/activityBar";
@@ -22,6 +22,9 @@ const ADDABLE_TABS: AddableTab[] = [
   { type: "file", labelKey: "workspace.filesTab", icon: FileText },
   { type: "changed", labelKey: "workspace.changedTab", icon: FileDiff },
   { type: "context", labelKey: "rightDock.overview", icon: Activity },
+  // A companion session is not a local panel: picking it asks the host to open
+  // the read-only session first, and the dock tab appears with the returned id.
+  { type: "sideChat", labelKey: "sideChat.title", icon: MessageSquareText },
 ];
 
 const BROWSER_TAB: AddableTab = { type: "browser", labelKey: "rightDock.browser", icon: Compass };

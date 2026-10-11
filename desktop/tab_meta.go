@@ -35,6 +35,9 @@ type TabMeta struct {
 	SessionDigest                  string              `json:"sessionDigest,omitempty"`
 	SessionGeneration              uint64              `json:"sessionGeneration,omitempty"`
 	ReadOnly                       bool                `json:"readOnly,omitempty"`
+	// SideChat marks a read-only companion session; ParentTabID names its owner.
+	SideChat    bool   `json:"sideChat,omitempty"`
+	ParentTabID string `json:"parentTabId,omitempty"`
 	// TakenOver marks a local or remote tab spectating a session whose writer is
 	// on the other side of a cooperative handoff.
 	TakenOver            bool                         `json:"takenOver,omitempty"`

@@ -1483,6 +1483,20 @@
       ]
     }
   },
+  "CloseSideChatTab": {
+    "domain": "desktop/side_chat.go",
+    "owner": "App.CloseSideChatTab",
+    "sources": [
+      "desktop/side_chat.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.CloseSideChatTab",
+      "inputs": [
+        "tabID"
+      ]
+    }
+  },
   "CloseTab": {
     "domain": "desktop/tabs.go",
     "owner": "App.CloseTab",
@@ -4929,6 +4943,20 @@
       "inputs": [
         "scope",
         "workspaceRoot"
+      ]
+    }
+  },
+  "OpenSideChatForTab": {
+    "domain": "desktop/side_chat.go",
+    "owner": "App.OpenSideChatForTab",
+    "sources": [
+      "desktop/side_chat.go"
+    ],
+    "scope": {
+      "kind": "owner-inputs",
+      "resolver": "App.OpenSideChatForTab",
+      "inputs": [
+        "parentTabID"
       ]
     }
   },

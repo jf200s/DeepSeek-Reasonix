@@ -85,7 +85,7 @@ for (const chatVisible of [false, true]) for (const localToolsEnabled of [false,
     const noop = () => {};
     const markup = renderToStaticMarkup(createElement(WorkspaceDockRegion, {
       visible: layout.dockVisible, overlay: layout.dockOverlay, mode: dockMode,
-      showContext: true, t: ((key: string) => key) as Translator,
+      showContext: true, parentSessionId: "", t: ((key: string) => key) as Translator,
       onPickEntry: noop, remote: { onClose: noop }, context: view.context,
       workspaceKey: "fixture", workspace: { open: layout.dockVisible, maximized: false, onClose: noop, onToggleMaximized: noop },
     }));

@@ -33,6 +33,9 @@ export function buildWorkspaceDockProps(input: {
   mode: RightDockMode;
   meta: Meta | null | undefined;
   tabId: string | undefined;
+  /** The conversation the main area currently shows; decides which companions
+   *  the dock may show. */
+  parentSessionId: string;
   completionSummary: WireCompletionSummary | undefined;
   turnStartAt: number;
   layout: { treeWidth: number; previewWidth: number; maximized: boolean };
@@ -50,6 +53,7 @@ export function buildWorkspaceDockProps(input: {
   return {
     visible: surface.renderable,
     overlay: surface.overlay,
+    parentSessionId: input.parentSessionId,
     mode: input.mode,
     showContext: input.showContext,
     t: input.t,

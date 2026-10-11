@@ -3,7 +3,6 @@ import { AlarmClock, MessageSquare, Search, Settings, Trash2 } from "lucide-reac
 import { Tooltip } from "../components/Tooltip";
 import type { Translator } from "../lib/i18n";
 import type { SettingsTab } from "../lib/types";
-import logoWordmark from "../assets/logo-wordmark.svg";
 
 const ProjectTree = lazy(() => import("../components/ProjectTree").then((module) => ({ default: module.ProjectTree })));
 
@@ -36,7 +35,7 @@ export function SidebarRegion(props: SidebarRegionProps) {
       <aside className={props.className} aria-label={t("sidebar.navigation")}>
         <div className="sidebar__head" aria-hidden={props.collapsed}>
           <div className="sidebar__brand sidebar__brand--workbench">
-            <img src={logoWordmark} alt="Reasonix" className="sidebar__brand-logo sidebar__brand-logo--workbench" draggable={false} />
+            <span className="sidebar__brand-logo sidebar__brand-logo--workbench" role="img" aria-label="Reasonix" />
           </div>
         </div>
         <div className="sidebar__quick-actions">

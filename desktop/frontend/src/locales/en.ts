@@ -426,6 +426,13 @@ export const en = {
   "rightDock.browser": "Browser",
   "rightDock.remote": "Remote",
   "rightDock.terminal": "Terminal",
+  "sideChat.title": "Side conversation",
+  "sideChat.openFromSelection": "Ask in side chat",
+  // No surface uses this yet: the side-chat contract reserves the key but never
+  // defined which interaction blocks on a pending companion request.
+  "sideChat.blocked": "Resolve the pending request in the side conversation first.",
+  "sideChat.unavailable": "Use this in an editable main task that supports side conversations.",
+  "sideChat.fromParent": "From {label}",
   "rightDock.launcher": "Open workspace panel",
   "rightDock.launcherTitle": "Workspace",
   "rightDock.showLauncher": "Show workspace menu",

@@ -517,6 +517,7 @@ export function Composer({
   guidanceQueuePreviewItems,
   showContextWindowRing = false,
   heroMode = false,
+  hostControls = true,
   context,
   turnCost,
   turnRateBand,
@@ -645,6 +646,8 @@ export function Composer({
   // Creation empty-session hero: slim centered composer under the welcome
   // headline (hides task/approval chrome; keeps model + effort).
   heroMode?: boolean;
+  // Read-only, ephemeral child sessions implement none of these controls.
+  hostControls?: boolean;
   context?: ContextInfo;
   turnCost?: number;
   turnRateBand?: string;
@@ -1832,21 +1835,21 @@ export function Composer({
     const normalized = normalizeSelectedText(selectedTextRequest.text);
     if (!normalized.text) return;
     if (normalized.truncated) showToast(t("composer.selectedTextTruncated"), "warn");
-    const path = selectedTextRequest.path;
-    const source = selectedTextRequest.source;
+    const { path, source, fromParent } = selectedTextRequest;
     const duplicate = selectedTextRefsRef.current.some(
       (reference) => reference.text === normalized.text
         && (reference.path ?? "") === (path ?? "")
-        && (reference.source ?? "") === (source ?? ""),
+        && (reference.source ?? "") === (source ?? "") && (reference.fromParent ?? "") === (fromParent ?? ""),
     );
     if (!duplicate) {
       const next = [
         ...selectedTextRefsRef.current,
         {
-          id: `${path ? "code" : source === "terminal" ? "terminal" : "chat"}-selection-${selectedTextRequest.id}`,
+          id: `${path ? "code" : source === "terminal" ? "terminal" : fromParent ? "parent" : "chat"}-selection-${selectedTextRequest.id}`,
           text: normalized.text,
           ...(path ? { path } : {}),
           ...(source ? { source } : {}),
+          ...(fromParent ? { fromParent } : {}),
         },
       ];
       selectedTextRefsRef.current = next;
@@ -4785,7 +4788,7 @@ export function Composer({
                 </Tooltip>
               </div>
             )}
-            {!heroMode && <div className="composer-meta__control composer-meta__control--approval">
+            {!heroMode && hostControls && <div className="composer-meta__control composer-meta__control--approval">
               <PermissionPresetChoice
                 key={`approval-${tabId}`}
                 value={permissionPreset}
@@ -4828,11 +4831,11 @@ export function Composer({
                   balance={balance} dismissSignal={transientDismissSignal}
                 />
               )}
-              <Suspense fallback={<span className="modelsw__label">{modelLabel}</span>}><ModelSwitcher composerMenu label={modelLabel} tabId={tabId} draftId={bridgeTarget.kind === "draft" ? bridgeTarget.draftId : undefined} ready={ready} sessionKey={sessionKey} disabled={disabled || suspendedByDecision} dismissSignal={transientDismissSignal} onPick={onSwitchModel} onManage={() => {
+              {hostControls && <Suspense fallback={<span className="modelsw__label">{modelLabel}</span>}><ModelSwitcher composerMenu label={modelLabel} tabId={tabId} draftId={bridgeTarget.kind === "draft" ? bridgeTarget.draftId : undefined} ready={ready} sessionKey={sessionKey} disabled={disabled || suspendedByDecision} dismissSignal={transientDismissSignal} onPick={onSwitchModel} onManage={() => {
                 useAppNavigationStore.getState().setSettingsFocus({ target: "model-access" });
                 useAppNavigationStore.getState().setSettingsTarget("models");
-              }} /></Suspense>
-              {hasEffort && !heroMode && <div className="composer-effort-control">
+              }} /></Suspense>}
+              {hasEffort && !heroMode && hostControls && <div className="composer-effort-control">
                 <ComposerChoice key={`effort-${tabId}`} label={effortLabel(currentEffort)}
                   ariaLabel={`${t("status.effortTitle")}: ${effortLabel(currentEffort)}`}
                   icon={<Brain size={16} />} showChevron

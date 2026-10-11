@@ -60,6 +60,26 @@ func TestBindChildWriteRootsSnapshotsParentGrants(t *testing.T) {
 	}
 }
 
+// TestDisableWriteAccessExpandClosesTheGate pins the half of the write-scope
+// boundary that lives upstream of execution. The tool set already hides the
+// writers from a read-only session, but the "extend write access" approval is
+// decided before any tool runs, so a session that never asked to expand is the
+// only thing that keeps that prompt from appearing at all.
+func TestDisableWriteAccessExpandClosesTheGate(t *testing.T) {
+	open := newAgentServices(nil, nil, nil, nil, nil, nil, nil, nil, Options{SubagentDepth: 0})
+	if !open.writeAccessExpandable {
+		t.Fatal("an ordinary top-level session may request new write access")
+	}
+	readOnly := newAgentServices(nil, nil, nil, nil, nil, nil, nil, nil, Options{SubagentDepth: 0, DisableWriteAccessExpand: true})
+	if readOnly.writeAccessExpandable {
+		t.Fatal("a read-only session must not request new write access")
+	}
+	nested := newAgentServices(nil, nil, nil, nil, nil, nil, nil, nil, Options{SubagentDepth: 1})
+	if nested.writeAccessExpandable {
+		t.Fatal("a nested session never requests new write access")
+	}
+}
+
 func TestApplyWriteAccessSubagentUsesStructuredHint(t *testing.T) {
 	work := t.TempDir()
 	outside := t.TempDir()
