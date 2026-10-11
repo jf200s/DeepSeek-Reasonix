@@ -2782,6 +2782,28 @@
     },
     {
       "cancellation": "before-dispatch",
+      "domain": "desktop/side_chat.go",
+      "name": "CloseSideChatTab",
+      "owner": "App.CloseSideChatTab",
+      "params": [
+        {
+          "kind": "string"
+        }
+      ],
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "tabID"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.CloseSideChatTab"
+      },
+      "sources": [
+        "desktop/side_chat.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
       "domain": "desktop/tabs.go",
       "name": "CloseTab",
       "owner": "App.CloseTab",
@@ -9335,6 +9357,32 @@
       },
       "sources": [
         "desktop/session_draft.go"
+      ]
+    },
+    {
+      "cancellation": "before-dispatch",
+      "domain": "desktop/side_chat.go",
+      "name": "OpenSideChatForTab",
+      "owner": "App.OpenSideChatForTab",
+      "params": [
+        {
+          "kind": "string"
+        }
+      ],
+      "result": {
+        "kind": "object",
+        "ref": "main.SideChatOpenResult"
+      },
+      "returnsError": true,
+      "scope": {
+        "inputs": [
+          "parentTabID"
+        ],
+        "kind": "owner-inputs",
+        "resolver": "App.OpenSideChatForTab"
+      },
+      "sources": [
+        "desktop/side_chat.go"
       ]
     },
     {
@@ -41571,6 +41619,28 @@
         }
       ]
     },
+    "main.SideChatOpenResult": {
+      "fields": [
+        {
+          "name": "TabID",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "SessionID",
+          "type": {
+            "kind": "string"
+          }
+        },
+        {
+          "name": "Ordinal",
+          "type": {
+            "kind": "integer"
+          }
+        }
+      ]
+    },
     "main.SkillRootSkillView": {
       "fields": [
         {
@@ -42204,6 +42274,20 @@
           "optional": true,
           "type": {
             "kind": "boolean"
+          }
+        },
+        {
+          "name": "sideChat",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
+          "name": "parentTabId",
+          "optional": true,
+          "type": {
+            "kind": "string"
           }
         },
         {

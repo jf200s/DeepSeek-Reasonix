@@ -26,6 +26,7 @@ import { Welcome } from "./Welcome";
 import { SessionLoadingIndicator } from "./SessionLoadingIndicator";
 import "./ChatTranscript.css";
 const ChatTurnNavigator = lazy(() => import("./ChatTurnNavigator"));
+const ChatSelectionAskMenu = lazy(() => import("./ChatSelectionAskMenu").then((module) => ({ default: module.ChatSelectionAskMenu })));
 export { NoticeCard } from "./TranscriptCards";
 
 export type TranscriptProps = {
@@ -41,6 +42,9 @@ export type TranscriptProps = {
   geometrySessionKey?: string;
   footerHeight?: number;
   onPrompt: (displayText: string, submitText?: string) => void;
+  /** Hands the selected transcript text to a companion session. Absent where no
+   *  companion can be offered: a read-only owner, and the companion's own panel. */
+  onAskInSideChat?: (text: string) => void;
   onFork?: (target: ForkTargetView) => void;
   onOpenTurnChanges?: (summary: WireCompletionSummary, initialPath?: string) => void;
   /** Persisted fork boundaries of the shown session; undefined until the first read resolves. */
@@ -158,6 +162,10 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
   }, [activeDetails]);
   const [pagingError, setPagingError] = useState(false);
   const [selectionBlocked, setSelectionBlocked] = useState(false);
+  // Where the selection action's menu is anchored, and the text it would hand
+  // over. It is set from the mouseup that finished the selection, so dragging
+  // across messages never flashes the menu mid-gesture.
+  const [askMenu, setAskMenu] = useState<{ x: number; y: number; text: string } | null>(null);
   // Deduplicate paging buttons; target navigation uses the store request fence.
   const pagingPromise = useRef<Promise<HistoryLoadOutcome> | null>(null);
   const navigationIntent = useRef(0);
@@ -167,11 +175,33 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
       ((selection.anchorNode && scroller.current.contains(selection.anchorNode)) ||
         (selection.focusNode && scroller.current.contains(selection.focusNode))));
   };
+  const selectedTranscriptText = () =>
+    (selectionInsideTranscript() ? window.getSelection?.()?.toString().trim() ?? "" : "");
   useEffect(() => {
-    const clear = () => { if (!selectionInsideTranscript()) setSelectionBlocked(false); };
+    const clear = () => {
+      if (selectionInsideTranscript()) return;
+      setSelectionBlocked(false);
+      setAskMenu(null);
+    };
     document.addEventListener("selectionchange", clear);
     return () => document.removeEventListener("selectionchange", clear);
   }, []);
+  // Only a surface that offers a companion installs this: the companion's own
+  // panel passes no handler, so a selection there never proposes another one.
+  useEffect(() => {
+    if (!props.onAskInSideChat) return;
+    const onMouseUp = (event: MouseEvent) => {
+      // A mouseup on the floating menu itself (it is portaled to <body>) must not
+      // be read as a new selection: closing the menu here would unmount the
+      // button before its click lands, so the action would never run.
+      if ((event.target as HTMLElement | null)?.closest(".floating-menu")) return;
+      const text = selectedTranscriptText();
+      if (!text || !scroller.current?.contains(event.target as Node)) { setAskMenu(null); return; }
+      setAskMenu({ x: event.clientX, y: event.clientY + 8, text });
+    };
+    document.addEventListener("mouseup", onMouseUp);
+    return () => document.removeEventListener("mouseup", onMouseUp);
+  }, [props.onAskInSideChat]);
   const loadPage = (direction: "older" | "newer" | "latest", trigger: HistoryLoadTrigger = "viewport-user", current?: () => boolean): Promise<HistoryLoadOutcome> => {
     if (pagingPromise.current && direction !== "latest") return pagingPromise.current;
     const load = direction === "older" ? () => onLoadOlderHistory?.(undefined, trigger) : () => onLoadNewerHistory?.(direction === "latest", current);
@@ -299,6 +329,17 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
             </div>
           </div>
           <button className="btn chat-to-bottom" hidden={position.following} aria-label={t("chat.toLatest")} onClick={() => void returnToLatest()}><ArrowDown size={18} /></button>
+          {askMenu && props.onAskInSideChat ? (
+            <Suspense fallback={null}>
+              <ChatSelectionAskMenu x={askMenu.x} y={askMenu.y} onAsk={() => {
+                // The handler is read at click time: the menu outlives the props
+                // it was opened with when the surface re-renders mid-selection.
+                const text = askMenu.text;
+                setAskMenu(null);
+                props.onAskInSideChat?.(text);
+              }} />
+            </Suspense>
+          ) : null}
         </div>
         {activeDetails && <ChatDetails key={activeDetails} source={source} nodeKey={activeDetails} loader={loader} onClose={closeDetails} onNavigate={setDetails} />}
       </section>

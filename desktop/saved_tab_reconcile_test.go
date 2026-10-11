@@ -601,7 +601,7 @@ func TestBindLegacyRecoveryOwnerDoesNotCreateReplacement(t *testing.T) {
 		SessionService: app.desktopSessionService(""), ExclusiveSession: true,
 	})
 	t.Cleanup(ctrl.Close)
-	ref, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", path, "", false)
+	ref, _, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", "", path, "", false, "")
 	if !errors.Is(err, errLegacySourceRecoveryPending) || ref.SessionID != "" {
 		t.Fatalf("legacy recovery fallback = ref:%+v err:%v", ref, err)
 	}

@@ -12,10 +12,20 @@ type controllerPromptState struct {
 	base string
 }
 
+// PinnedContextTarget identifies the session whose standing context a
+// PinnedContextLoader should read. Exactly one field is set: SessionID for a
+// canonical session, Path for a legacy session that still carries a transcript
+// path. Callers keep the two apart so a loader never has to guess which kind of
+// identity it received.
+type PinnedContextTarget struct {
+	SessionID string
+	Path      string
+}
+
 // PinnedContextLoader resolves the sidecar-owned desired context for the
 // controller's current session immediately before an admitted model turn.
 // Implementations perform I/O without holding Controller or Session locks.
-type PinnedContextLoader func(context.Context, string) (agent.PinnedContextSnapshot, error)
+type PinnedContextLoader func(context.Context, PinnedContextTarget) (agent.PinnedContextSnapshot, error)
 
 func newControllerPromptState(base string, executor *agent.Agent) controllerPromptState {
 	current := ""
@@ -67,9 +77,9 @@ func (c *Controller) SystemPrompt() string {
 }
 
 // runModelTurn is the sole controller-to-runner entry point. The controller's
-// turn gate is already held, so its session path cannot rotate while the loader
-// reads the sidecar. StagePinnedContext only mutates Agent host state; the
-// revision is appended atomically with the real user message after
+// turn gate is already held, so its session identity cannot rotate while the
+// loader reads the sidecar. StagePinnedContext only mutates Agent host state;
+// the revision is appended atomically with the real user message after
 // agent.before_start accepts the turn.
 func (c *Controller) runModelTurn(ctx context.Context, input string) error {
 	if c == nil || c.runner == nil {
@@ -84,7 +94,7 @@ func (c *Controller) runModelTurn(ctx context.Context, input string) error {
 		ctx = agent.WithContinuationPolicy(ctx, agent.ContinuationExplicitFlow)
 	}
 	if c.pinnedContextLoader != nil && c.executor != nil {
-		snapshot, err := c.pinnedContextLoader(ctx, c.SessionPath())
+		snapshot, err := c.pinnedContextLoader(ctx, c.pinnedContextTarget())
 		if err != nil {
 			return err
 		}
@@ -93,4 +103,15 @@ func (c *Controller) runModelTurn(ctx context.Context, input string) error {
 		}
 	}
 	return c.runner.Run(ctx, input)
+}
+
+// pinnedContextTarget resolves the session identity that locates pinned
+// standing context. A canonical session is addressed by its immutable
+// SessionRef; only a session that still carries a legacy transcript path falls
+// back to it, which is also where such a session keeps its sidecar.
+func (c *Controller) pinnedContextTarget() PinnedContextTarget {
+	if ref, ok := c.SessionRef(); ok {
+		return PinnedContextTarget{SessionID: ref.SessionID}
+	}
+	return PinnedContextTarget{Path: c.SessionPath()}
 }

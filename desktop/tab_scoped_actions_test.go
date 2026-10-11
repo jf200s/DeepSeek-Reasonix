@@ -15,6 +15,7 @@ import (
 
 type tabScopedActionController struct {
 	stubSessionAPI
+	goal              string
 	history           []provider.Message
 	newSessionCalls   int
 	clearSessionCalls int
@@ -37,7 +38,7 @@ func (c *tabScopedActionController) RuntimeStatus() control.RuntimeStatus {
 }
 func (c *tabScopedActionController) PlanMode() bool         { return false }
 func (c *tabScopedActionController) AutoApproveTools() bool { return false }
-func (c *tabScopedActionController) Goal() string           { return "" }
+func (c *tabScopedActionController) Goal() string           { return c.goal }
 func (c *tabScopedActionController) ToolApprovalMode() string {
 	return control.ToolApprovalAsk
 }

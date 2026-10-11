@@ -55,7 +55,7 @@ func pinnedConcurrencyFixture(t *testing.T, prov provider.Provider) (*App, *Work
 		Runner:              exec,
 		Executor:            exec,
 		SystemPrompt:        "BASE",
-		PinnedContextLoader: pinnedContextLoader(root),
+		PinnedContextLoader: pinnedContextLoader(&App{}, root, "pinned-race"),
 		SessionDir:          root,
 		SessionPath:         path,
 		Label:               "test",

@@ -60,7 +60,7 @@ func TestGlobalWorkspaceEquivalentRootAllowsCreateAndRestart(t *testing.T) {
 					SessionService: app.desktopSessionService(""), ExclusiveSession: true,
 				})
 				t.Cleanup(ctrl.Close)
-				got, workspaceID, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", ref.SessionID, "", "", false)
+				got, workspaceID, err := app.bindTabCanonicalSession(t.Context(), ctrl, &config.Config{}, "global", "", ref.SessionID, "", "", false, "")
 				if err != nil || workspaceID != workspacestate.GlobalWorkspaceID {
 					t.Fatalf("create/reopen attempt %d: workspace=%q, err=%v", attempt, workspaceID, err)
 				}
@@ -115,7 +115,7 @@ func TestFreshDesktopSessionIsDurableRegistryMemberBeforeReturn(t *testing.T) {
 	service := app.desktopSessionService(filepath.Join(root, "old-project-sessions"))
 	project := filepath.Join(root, "project")
 
-	ref, workspaceID, err := app.bindFreshDesktopSession(t.Context(), "project", project, registrySessionCreator{service: service})
+	ref, workspaceID, err := app.bindFreshDesktopSession(t.Context(), "project", project, registrySessionCreator{service: service}, "")
 	if err != nil {
 		t.Fatalf("bindFreshDesktopSession: %v", err)
 	}

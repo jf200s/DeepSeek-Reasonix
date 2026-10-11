@@ -34,6 +34,7 @@ import type {
   SessionMutationResult,
   SessionRef,
   SessionSelector,
+  SideChatOpenResult,
   ComposerTarget,
   WorkspaceSessionPage,
   WorkspaceSnapshot,
@@ -449,6 +450,10 @@ export interface AppBindings extends AttachmentBindings, SessionExportBindings, 
   CompactForTab(tabID: string): Promise<void>;
   NewSession(): Promise<void>;
   NewSessionForTab(tabID: string): Promise<void>;
+  /** Opens a read-only companion session owned by the parent tab. */
+  OpenSideChatForTab(parentTabID: string): Promise<SideChatOpenResult>;
+  /** Closes one companion tab and deletes its throwaway session. */
+  CloseSideChatTab(tabID: string): Promise<void>;
   ClearSession(): Promise<SessionClearResult>;
   ClearSessionForTab(tabID: string): Promise<SessionClearResult>;
   History(): Promise<HistoryMessage[]>;
@@ -3340,6 +3345,10 @@ function makeMockApp(): MockAppBindings {
         async CompactForTab() {},
         async NewSession() {},
         async NewSessionForTab() {},
+        async OpenSideChatForTab(parentTabID: string) {
+          return { TabID: `mock-side-chat-${parentTabID}`, SessionID: "", Ordinal: 1 };
+        },
+        async CloseSideChatTab() {},
         async ClearSession() { return { sessionPath: "", sessionGeneration: 0 }; },
         async ClearSessionForTab() { return { sessionPath: "", sessionGeneration: 0 }; },
     async Checkpoints() {

@@ -13,6 +13,7 @@ import { useRuntimeSession } from "./useRuntimeState";
 import { acceptSessionRuntimeSnapshot, type RuntimeState } from "./runtimeStateStore";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { asArray } from "./array";
+import { createBackgroundFollow } from "./backgroundTranscriptFollow";
 import { createControllerModelCommands } from "./controllerModelCommands";
 import { compactArchivedToolItems } from "./archivedToolItems";
 import { addBreadcrumb } from "./breadcrumbs";
@@ -2627,16 +2628,11 @@ export function useController() {
     });
     transcriptSubscriptions.current.set(tabId, unsubscribe);
   }, [dispatchTo, bumpSessionLoadSeq]);
-  const startTranscriptFollow = useCallback(async (tabId: string, path: string) => {
-    ensureTranscriptSubscription(tabId, { path, key: sessionIdentityStableKey(statesRef.current.get(tabId)?.meta) });
-    followers.current.get(tabId)?.stop();
-    const follower = new TranscriptSessionFollower(tabId, path, false, action => {
-      if (followers.current.get(tabId) === follower) dispatchTo(tabId, action);
-    });
-    followers.current.set(tabId, follower);
-    await follower.start();
-    return follower.metrics;
-  }, [dispatchTo, ensureTranscriptSubscription]);
+  const backgroundFollow = useMemo(() => createBackgroundFollow({
+    followers, state: (tabId) => statesRef.current.get(tabId),
+    subscribe: ensureTranscriptSubscription, dispatch: dispatchTo,
+  }), [dispatchTo, ensureTranscriptSubscription]);
+  const startTranscriptFollow = backgroundFollow.start;
   const detachTranscriptState = useCallback((tabId: string) => {
     followers.current.get(tabId)?.stop();
     followers.current.delete(tabId);
@@ -3355,6 +3351,8 @@ export function useController() {
     const handleWireEvent = (e: WireEvent) => {
       const targetTabId = e.tabId;
       if (!targetTabId) throw new Error("ordered event has no target tab");
+      // Per event, not on readiness: a companion's meta lands after creation.
+      backgroundFollow.attach(targetTabId);
       if (e.kind === "turn_done" || e.tool) void import("./autoHTML")
         .then((module) => module.default(e, targetTabId, activeTabIdRef, statesRef));
       if (e.kind === "turn_done" || e.kind === "context_maintenance") {
@@ -3382,7 +3380,10 @@ export function useController() {
     const offReady = onReady((readyTabId) => {
       const activeId = activeTabIdRef.current;
       if (readyTabId && activeId && readyTabId !== activeId) {
-        addBreadcrumb("tab.hydrate", `ready ignored ${readyTabId}`);
+        // A tab the main area is not showing still needs a follower, but its
+        // readiness is not a navigation intent.
+        backgroundFollow.attachOnReady(readyTabId);
+        addBreadcrumb("tab.hydrate", `ready tail-follow ${readyTabId}`);
         return;
       }
       // Refresh metadata without turning passive readiness into navigation.

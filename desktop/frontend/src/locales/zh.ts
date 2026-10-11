@@ -427,6 +427,13 @@ export const zh: Record<DictKey, string> = {
   "rightDock.browser": "浏览器",
   "rightDock.remote": "远程",
   "rightDock.terminal": "终端",
+  "sideChat.title": "辅助对话",
+  "sideChat.openFromSelection": "在辅助对话中提问",
+  // No surface uses this yet: the side-chat contract reserves the key but never
+  // defined which interaction blocks on a pending companion request.
+  "sideChat.blocked": "请先处理辅助对话中的待处理请求。",
+  "sideChat.unavailable": "请在支持辅助对话的可编辑主任务中使用。",
+  "sideChat.fromParent": "来自：{label}",
   "rightDock.launcher": "打开工作区面板",
   "rightDock.launcherTitle": "工作区",
   "rightDock.showLauncher": "展开工作区浮层",

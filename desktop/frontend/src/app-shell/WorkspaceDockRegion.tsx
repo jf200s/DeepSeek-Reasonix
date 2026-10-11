@@ -7,6 +7,7 @@ import type { RightDockMode } from "../store/layout";
 import type { TabItem } from "../store/activityBar";
 import { useActivityBarStore } from "../store/activityBar";
 import { readWorkspaceTreeMemory, workspaceViewMemoryKey } from "../lib/workspaceViewMemory";
+import { useToast } from "../lib/toast";
 import { useDockViewRequests } from "./useDockViewRequests";
 
 // The tab strip, its drag state machine and the add menu are a deferred
@@ -17,6 +18,10 @@ const TabContainer = lazy(() => import("../components/TabContainer/TabContainer"
 const ContextPanel = lazy(() => import("../components/ContextPanel").then((module) => ({ default: module.ContextPanel })));
 const RemotePanel = lazy(() => import("../components/RemotePanel").then((module) => ({ default: module.RemotePanel })));
 const BrowserSurface = lazy(() => import("../components/BrowserPanelEntry"));
+// The companion panel pulls the transcript and the composer, so it stays out of
+// the initial bundle until a side-chat tab is actually opened.
+const SideChatPanel = lazy(() =>
+  import("../components/SideChatPanel").then((module) => ({ default: module.SideChatPanel })));
 const WorkspacePanel = lazy(async () => {
   const [module] = await Promise.all([
     import("../components/WorkspacePanel"),
@@ -54,6 +59,7 @@ export type WorkspaceDockRegionProps = {
 /** The right-hand dock shared by every workspace tab. */
 export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   const { visible, overlay, mode, showContext, t } = props;
+  const { showToast } = useToast();
   const firstFileTabId = useActivityBarStore(state => state.tabs.find(tab => tab.type === "file")?.id);
   const loadedRoot = useActivityBarStore(state => state.workspaceRoot);
   const activeTabId = useActivityBarStore(state => state.activeTabId);
@@ -65,6 +71,21 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   const fileNavigation = fileNavigationProp ?? fallbackFileNavigation;
   const projectReady = loadedRoot === (props.workspaceRoot ?? props.workspace.cwd ?? "");
   const requests = useDockViewRequests(`${props.workspaceKey}::${props.workspace.tabId ?? ""}`, visible && projectReady ? activeTabId : null, props.workspace, props.navigation, tabs.map(tab => tab.id));
+
+  // A companion session needs a host round-trip before its dock tab can exist,
+  // so the opener is loaded on demand and this region keeps the host bridge out
+  // of its own import graph.
+  const openSideChat = (title: string) => {
+    void import("../lib/sideChatOpen")
+      .then((module) => module.openSideChatTab(props.workspace.tabId ?? "", title))
+      .catch((error) => {
+        // A read-only owner has no companion to offer. Say so: this menu entry is
+        // the one opener that cannot check the owner itself, so the host's
+        // refusal is a signal the user would otherwise never see.
+        console.warn("side chat: open from the dock failed", error);
+        showToast(t("sideChat.unavailable"), "info", { durationMs: 6000 });
+      });
+  };
 
   const renderTab = (tab: TabItem): ReactNode => {
     if (!projectReady) return null;
@@ -79,6 +100,21 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
         return <RemotePanel key={`${props.workspaceKey}::${props.workspace.tabId}::${tab.id}`} {...props.remote} tabId={props.workspace.tabId} dockTabId={tab.id} fileNavigation={fileNavigation} navigationSignal={requests.navigationSignal} />;
       case "browser":
         return <BrowserSurface surface="panel" taskId={props.workspace.tabId} />;
+      case "sideChat": {
+        // A companion session has no dock panel mode: it renders its own child
+        // session, so a tab without a child id is not renderable.
+        const childTabId = typeof tab.meta?.childTabId === "string" ? tab.meta.childTabId : "";
+        const parentTabId = typeof tab.meta?.parentTabId === "string" ? tab.meta.parentTabId : "";
+        if (!childTabId) return null;
+        return (
+          <SideChatPanel
+            key={`${props.workspaceKey}::${tab.id}`}
+            tabId={childTabId}
+            parentTabId={parentTabId}
+            cwd={props.workspace.cwd}
+          />
+        );
+      }
       default:
         return (
           <WorkspacePanel
@@ -110,7 +146,7 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
         <aside className={["workbench-dock", `workbench-dock--${mode}`, overlay ? "workbench-dock--overlay" : ""].join(" ")} aria-label={t("rightDock.workbench")}>
           <div className="workbench-dock__panel">
             <Suspense fallback={null}>
-              <TabContainer key={loadedRoot} renderTab={renderTab} onPickEntry={props.onPickEntry} onClosePanel={props.workspace.onClose} />
+              <TabContainer key={loadedRoot} renderTab={renderTab} onPickEntry={props.onPickEntry} onPickSideChat={openSideChat} onClosePanel={props.workspace.onClose} />
             </Suspense>
           </div>
         </aside>

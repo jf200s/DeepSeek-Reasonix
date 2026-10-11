@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"reasonix/internal/agent"
+	"reasonix/internal/control"
 	"reasonix/internal/event"
 	"reasonix/internal/provider"
 )
@@ -89,7 +90,7 @@ model = "x"
 	loaderCalls := 0
 	ctrl, err := Build(context.Background(), Options{
 		Sink: event.Discard,
-		PinnedContextLoader: func(context.Context, string) (agent.PinnedContextSnapshot, error) {
+		PinnedContextLoader: func(context.Context, control.PinnedContextTarget) (agent.PinnedContextSnapshot, error) {
 			loaderCalls++
 			return agent.PinnedContextSnapshot{Files: []agent.PinnedContextFile{{Path: "a.md", Content: "A"}}}, nil
 		},

@@ -28,6 +28,12 @@ func (c *Controller) EnsureHeadlessRunSessionPath() {
 	c.ensureSessionPath(session.CreateOptions{Kind: session.SessionKindHeadlessRun})
 }
 
+// EnsureSideChatSessionPath is EnsureSessionPath for a companion session: a
+// fresh store records that kind so conversation lists can leave it out.
+func (c *Controller) EnsureSideChatSessionPath() {
+	c.ensureSessionPath(session.CreateOptions{Kind: session.SessionKindSideChat})
+}
+
 func (c *Controller) ensureSessionPath(options session.CreateOptions) {
 	if _, ok := c.SessionRef(); ok {
 		return

@@ -18,10 +18,12 @@ interface TabContainerProps {
   renderTab: (tab: TabItem) => ReactNode;
   /** Opens (or activates) the view a tab-picker entry stands for. */
   onPickEntry: (entryId: string) => void;
+  /** Opens a companion session for the current parent tab (host round-trip). */
+  onPickSideChat?: (title: string) => void;
   onClosePanel?: () => void;
 }
 
-export function TabContainer({ renderTab, onPickEntry, onClosePanel }: TabContainerProps) {
+export function TabContainer({ renderTab, onPickEntry, onPickSideChat, onClosePanel }: TabContainerProps) {
   const tabs = useActivityBarStore((s) => s.tabs);
   const activeTabId = useActivityBarStore((s) => s.activeTabId);
   const addMenuOpen = useActivityBarStore((s) => s.addMenuOpen);
@@ -36,12 +38,18 @@ export function TabContainer({ renderTab, onPickEntry, onClosePanel }: TabContai
   // (it knows its own bounds); the panel itself must not swallow those clicks.
 
   // Every panel type can be added repeatedly, so the pick handler always
-  // appends a fresh tab (no dedup via openEntry).
+  // appends a fresh tab (no dedup via openEntry). A side chat is the exception:
+  // its tab can only exist after the host opened the companion session, so the
+  // parent owns that round-trip and this container stays presentation-only.
   const handlePickTab = useCallback(
     (type: TabType, label: string) => {
+      if (type === "sideChat") {
+        onPickSideChat?.(label);
+        return;
+      }
       addTab(type, label);
     },
-    [addTab],
+    [addTab, onPickSideChat],
   );
 
   return (

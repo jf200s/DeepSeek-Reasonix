@@ -249,7 +249,7 @@ func TestPinnedContextEndToEndProviderRequest(t *testing.T) {
 		Runner:              exec,
 		Executor:            exec,
 		SystemPrompt:        baseSystem,
-		PinnedContextLoader: pinnedContextLoader(dir),
+		PinnedContextLoader: pinnedContextLoader(&App{}, dir, ""),
 		SessionDir:          dir,
 		SessionPath:         sessionPath,
 		Label:               "test-e2e",

@@ -206,11 +206,11 @@ func (a *App) ensureDesktopWorkspace(ctx context.Context, scope, workspaceRoot s
 	return resolvedID, err
 }
 
-func (a *App) bindFreshDesktopSession(ctx context.Context, scope, workspaceRoot string, creator freshSessionCreator) (session.SessionRef, string, error) {
-	return a.bindFreshDesktopSessionWithIDs(ctx, scope, workspaceRoot, creator, "", "")
+func (a *App) bindFreshDesktopSession(ctx context.Context, scope, workspaceRoot string, creator freshSessionCreator, kind session.SessionKind) (session.SessionRef, string, error) {
+	return a.bindFreshDesktopSessionWithIDs(ctx, scope, workspaceRoot, creator, "", "", kind)
 }
 
-func (a *App) bindFreshDesktopSessionWithIDs(ctx context.Context, scope, workspaceRoot string, creator freshSessionCreator, sessionID, operationID string) (session.SessionRef, string, error) {
+func (a *App) bindFreshDesktopSessionWithIDs(ctx context.Context, scope, workspaceRoot string, creator freshSessionCreator, sessionID, operationID string, kind session.SessionKind) (session.SessionRef, string, error) {
 	workspaceID, err := a.ensureDesktopWorkspace(ctx, scope, workspaceRoot)
 	if err != nil {
 		return session.SessionRef{}, "", err
@@ -225,7 +225,10 @@ func (a *App) bindFreshDesktopSessionWithIDs(ctx context.Context, scope, workspa
 	if err := store.BeginCreate(ctx, workspacestate.PendingCreate{OperationID: operationID, WorkspaceID: workspaceID, SessionID: sessionID}); err != nil {
 		return session.SessionRef{}, "", err
 	}
-	options := session.CreateOptions{SessionID: sessionID, CWD: desktopWorkspaceRoot(scope, workspaceRoot), Origin: session.SessionOriginNew}
+	// The kind is recorded here, at the only place a desktop tab mints its first
+	// session: the companion's later EnsureSideChatSessionPath is a no-op because
+	// a tab's controller is already bound by the time its first input arrives.
+	options := session.CreateOptions{SessionID: sessionID, CWD: desktopWorkspaceRoot(scope, workspaceRoot), Origin: session.SessionOriginNew, Kind: kind}
 	var ref session.SessionRef
 	if headerCreator, ok := creator.(interface {
 		BindFreshSessionWithOptions(context.Context, session.CreateOptions) (session.SessionRef, error)

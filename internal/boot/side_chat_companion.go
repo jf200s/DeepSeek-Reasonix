@@ -1,0 +1,55 @@
+package boot
+
+import "strings"
+
+// SideChatParent names the conversation a read-only companion was opened from.
+// Only the owner's stable identity belongs here: it enters the companion's
+// cache-stable system prompt, so a companion always names the conversation it
+// belongs to. What the owner is currently doing arrives per turn as pinned
+// standing context instead, which appends a revision without rewriting that
+// prefix. Nothing here may mutate the owner's own prefix or tool schema.
+type SideChatParent struct {
+	Title     string
+	SessionID string
+}
+
+// appendSideChatCompanionPolicy adds which conversation this companion belongs
+// to, and the boundary that comes with it. It is applied once per session, so
+// the prefix stays byte-stable across turns.
+func appendSideChatCompanionPolicy(sysPrompt string, parent *SideChatParent) string {
+	title, sessionID := sideChatParentIdentity(parent)
+	if title == "" && sessionID == "" {
+		return sysPrompt
+	}
+	var b strings.Builder
+	b.WriteString("# Side conversation\n\n")
+	b.WriteString("This session is the read-only companion of the conversation ")
+	b.WriteString(describeSideChatParent(title, sessionID))
+	b.WriteString(". It shares that conversation's working directory and standing instructions, ")
+	b.WriteString("but not its transcript: the user asks you separately, so treat only what they quote or ")
+	b.WriteString("describe as context. You cannot change the workspace; when a change is needed, say so ")
+	b.WriteString("and let the user make it in the conversation you belong to.")
+	return sysPrompt + "\n\n" + b.String()
+}
+
+func sideChatParentIdentity(parent *SideChatParent) (string, string) {
+	if parent == nil {
+		return "", ""
+	}
+	return strings.TrimSpace(parent.Title), strings.TrimSpace(parent.SessionID)
+}
+
+// describeSideChatParent renders "<title>" (session <id>) with whichever half is
+// known, so a companion still names its owner when only one was available.
+func describeSideChatParent(title, sessionID string) string {
+	switch {
+	case title != "" && sessionID != "":
+		return `"` + title + `" (session ` + sessionID + `)`
+	case title != "":
+		return `"` + title + `"`
+	case sessionID != "":
+		return "session " + sessionID
+	default:
+		return "an unnamed conversation"
+	}
+}

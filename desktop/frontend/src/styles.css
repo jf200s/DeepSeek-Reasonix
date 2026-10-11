@@ -33464,15 +33464,18 @@ body > .mermaid-diagram--fullscreen {
 /* Home: shell elements — controlled by paneOpacity (面板透明度) */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .sidebar,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .topicbar,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock__tools,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workspace-panel,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .statusbar {
   background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-shell-pct, 60%), transparent) !important;
 }
 
-/* Home: chat area — controlled by paneOpacity (面板透明度) */
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .chat-pane {
+/* Home: chat area — controlled by paneOpacity (面板透明度).
+   The dock holds content panels (companion, files, changes), not chrome, so it
+   rides the chat surface: painting it with --bg-elev instead left a companion
+   on a differently-coloured slab than the transcript beside it. */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .chat-pane,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workbench-dock__tools,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="home"] .app:not(.app--creation) .workspace-panel {
   background: color-mix(in srgb, var(--chat-bg, var(--bg)) calc(var(--theme-pane-alpha, 0.72) * 100%), transparent) !important;
 }
 
@@ -33590,15 +33593,17 @@ body > .mermaid-diagram--fullscreen {
 /* Task: shell elements — controlled by paneOpacity (面板透明度) */
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .sidebar,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .topicbar,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock__tools,
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workspace-panel,
 :root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .statusbar {
   background: color-mix(in srgb, var(--bg-elev) var(--theme-pane-task-shell-pct, 78%), transparent) !important;
 }
 
-/* Task: chat area — controlled by paneOpacity (面板透明度) */
-:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .chat-pane {
+/* Task: chat area — controlled by paneOpacity (面板透明度).
+   The dock rides the chat surface for the same reason as in the home scene: a
+   companion is a content pane, and --bg-elev would give it its own slab. */
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .chat-pane,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workbench-dock__tools,
+:root[data-theme-pack][data-theme-has-bg="true"][data-theme-scene="task"] .app:not(.app--creation) .workspace-panel {
   background: color-mix(in srgb, var(--chat-bg, var(--bg)) calc(var(--theme-pane-task-alpha, 0.80) * 100%), transparent) !important;
 }
 
@@ -33714,13 +33719,13 @@ body > .mermaid-diagram--fullscreen {
 /* Fallback: scene-independent transparency for data-theme-pack */
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .sidebar,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .topicbar,
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workbench-dock,
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workbench-dock__tools,
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workspace-panel,
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .statusbar {
   background: color-mix(in srgb, var(--bg-elev) 80%, transparent) !important;
 }
-:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .chat-pane {
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .chat-pane,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workbench-dock,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workbench-dock__tools,
+:root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .workspace-panel {
   background: color-mix(in srgb, var(--chat-bg, var(--bg)) 72%, transparent) !important;
 }
 :root[data-theme-pack][data-theme-has-bg="true"] .app:not(.app--creation) .chat-pane > * {

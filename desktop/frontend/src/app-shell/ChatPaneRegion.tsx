@@ -15,6 +15,7 @@ import { orderedLocalSubmissions } from "../lib/localSubmissionState";
 import { RotateCcw } from "lucide-react";
 import type { SessionDraftSurface } from "../app-runtime/useSessionDraftSurface";
 import { draftSurfaceNeedsAttention, sameDraftError } from "./draftPresentation";
+import { useToast } from "../lib/toast";
 
 const RemoteSessionSurface = lazy(() => import("../components/RemoteSessionSurface").then((module) => ({ default: module.RemoteSessionSurface })));
 const SidebarImConnectionDetail = lazy(() => import("./SidebarImConnectionDetail").then((module) => ({ default: module.SidebarImConnectionDetail })));
@@ -86,6 +87,7 @@ export type ChatPaneRegionProps = {
  */
 export function ChatPaneRegion(props: ChatPaneRegionProps) {
   const { transitioning, t, transcript, commands } = props;
+  const { showToast } = useToast();
   const { state, rewind } = transcript;
   // A fork entry reads persisted turn records, so it never waits for the session
   // to stop running, and a read-only source still forks: the child is written
@@ -175,6 +177,20 @@ export function ChatPaneRegion(props: ChatPaneRegionProps) {
                 geometrySessionKey={transcript.geometrySessionKey}
                 footerHeight={transcript.footerHeight}
                 onPrompt={commands.onPrompt}
+                onAskInSideChat={transcript.readOnly ? undefined : (text) => {
+                  // The opener owns the host round-trip, so it is imported on
+                  // demand: the chat pane stays out of the bridge's import graph.
+                  // A refusal (a read-only owner, or a host that could not build
+                  // the companion) comes back as "false" — the companion never
+                  // came up, and only the user can act on that, so it does not
+                  // end at a console line.
+                  const parentTabId = transcript.tabId ?? "";
+                  const refused = () => showToast(t("sideChat.unavailable"), "info", { durationMs: 6000 });
+                  void import("../lib/sideChatOpen")
+                    .then((module) => module.askInSideChat(parentTabId, text, t("sideChat.title")))
+                    .then((opened) => { if (!opened) refused(); })
+                    .catch((error) => { console.warn("side chat: ask from selection failed", error); refused(); });
+                }}
                 onFork={commands.onFork}
                 onOpenTurnChanges={commands.onOpenTurnChanges}
                 forkTargets={state.forkTargets}

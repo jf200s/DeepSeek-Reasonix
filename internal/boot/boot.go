@@ -120,6 +120,14 @@ type Options struct {
 	// --allowed-tools). They override configured ask rules but never deny rules
 	// and are not persisted.
 	PermissionAllow []string
+	// ReadOnlySession builds this controller with the read-only tool set:
+	// research tools plus the read-only shell wrapper, minus writer and
+	// workflow/meta tools. Desktop uses it for side-chat sessions.
+	ReadOnlySession bool
+	// SideChatParent names the conversation a companion was opened from. The
+	// owner's identity enters the system prompt and its goal/activity enter the
+	// session-context snapshot; the owner's own prefix and tools are untouched.
+	SideChatParent *SideChatParent
 	// AdditionalDirs grants this session's file writers and sandboxed shell
 	// access to extra directories without changing persisted sandbox config.
 	AdditionalDirs []string
@@ -641,6 +649,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 	}
 	sysPrompt = appendCorePolicies(sysPrompt)
 	sysPrompt += "\n\n" + sessioncontext.PolicyBlock()
+	sysPrompt = appendSideChatCompanionPolicy(sysPrompt, opts.SideChatParent)
 	sessionContextStatic := sessioncontext.Sections{Workspace: currentWorkspacePromptLine(root)}
 	// Execution modes no longer exist. Host obligations are fact-driven and
 	// never rewrite the cache-stable system prefix or tool schemas.
@@ -1688,6 +1697,8 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		return missing
 	})
 
+	reg = readOnlySessionRegistry(reg, opts.ReadOnlySession)
+
 	execSess := newObservedSession(sysPrompt)
 	executor := agent.New(execProv, reg, execSess, agent.Options{
 		ImageInput:   imageConfig,
@@ -1710,6 +1721,7 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		HomeDir:                      userHomeDir(),
 		StateRoot:                    config.MemoryUserDir(),
 		Ablation:                     opts.Ablation,
+		ReadOnlyExecution:            opts.ReadOnlySession,
 		WorkspaceLease:               workspaceLease,
 		CapabilityLedger:             capLedger,
 		CapabilityAudit:              capAudit,

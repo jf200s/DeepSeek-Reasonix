@@ -34,6 +34,8 @@ func (a *App) sessionOpenBootOptions(
 	return boot.Options{
 		Model:                    model,
 		RequireKey:               false,
+		ReadOnlySession:          tab.SideChat.Enabled,
+		SideChatParent:           sideChatParentForBoot(tab),
 		StatsSource:              "desktop",
 		TaskStore:                a.taskStore(),
 		OnConfigLoadWarnings:     a.configLoadWarningsHandler(),
@@ -50,7 +52,7 @@ func (a *App) sessionOpenBootOptions(
 		CleanupPendingReconciler: reconcileDesktopCleanupPending,
 		SubagentParentLive:       a.subagentParentProbeForBuild(tab),
 		SessionRecoveryMeta:      a.tabSessionRecoveryMeta(tab),
-		PinnedContextLoader:      pinnedContextLoader(root),
+		PinnedContextLoader:      pinnedContextLoader(a, root, tab.ID),
 		OnSessionRecovered:       a.handleTabSessionRecovered(tab),
 		OnSessionTransition:      a.handleTabSessionTransition(tab),
 		BeforeInboxDispatch:      a.beforeInboxDispatch,
@@ -103,6 +105,7 @@ func (a *App) bindTabCanonicalSession(
 	cfg *config.Config,
 	scope, workspaceRoot, sessionID, legacyPath, model string,
 	modelFallback bool,
+	kind session.SessionKind,
 ) (session.SessionRef, string, error) {
 	var ref session.SessionRef
 	var workspaceID string
@@ -132,7 +135,7 @@ func (a *App) bindTabCanonicalSession(
 				operationID = tab.PendingCreateOperationID
 			}
 			if operationID != "" {
-				ref, workspaceID, err = a.bindFreshDesktopSessionWithIDs(ctx, scope, workspaceRoot, identity, sessionID, operationID)
+				ref, workspaceID, err = a.bindFreshDesktopSessionWithIDs(ctx, scope, workspaceRoot, identity, sessionID, operationID, kind)
 			}
 		}
 	case strings.TrimSpace(legacyPath) != "":
@@ -147,10 +150,10 @@ func (a *App) bindTabCanonicalSession(
 			if savedTabHasRecoveryOwner(desktopTabEntry{SessionPath: legacyPath}, evidence) {
 				return ref, "", errLegacySourceRecoveryPending
 			}
-			ref, workspaceID, err = a.bindFreshDesktopSession(ctx, scope, workspaceRoot, identity)
+			ref, workspaceID, err = a.bindFreshDesktopSession(ctx, scope, workspaceRoot, identity, kind)
 		}
 	default:
-		ref, workspaceID, err = a.bindFreshDesktopSession(ctx, scope, workspaceRoot, identity)
+		ref, workspaceID, err = a.bindFreshDesktopSession(ctx, scope, workspaceRoot, identity, kind)
 	}
 	if err == nil && workspaceID == "" {
 		workspaceID, err = a.attachDesktopSession(ctx, scope, workspaceRoot, ref)

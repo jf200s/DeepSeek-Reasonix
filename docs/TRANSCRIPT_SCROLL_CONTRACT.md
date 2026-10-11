@@ -39,6 +39,13 @@ viewport or change which history is resident.
   output, while later answers and tools retain their surviving or newly formal
   predecessors within that turn. Turn identity must not pull every live row
   directly behind the user and reverse the order of sampling rounds.
+- **A tab the main area is not showing still has a follower**: events reach a
+  tab's state only through its `TranscriptSessionFollower`
+  (`../desktop/frontend/src/lib/backgroundTranscriptFollow.ts`), so a background
+  tab whose readiness is not a navigation intent attaches one without
+  navigating, and an already-attached tab is never attached twice. The dock's
+  companion session depends on this: without it the companion's events arrive at
+  the renderer and are dropped while the host runs the turn in full.
 
 ## Single writer
 
