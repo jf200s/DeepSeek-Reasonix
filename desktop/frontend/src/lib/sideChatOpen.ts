@@ -53,13 +53,13 @@ export async function askInSideChat(parentTabId: string, text: string, title: st
   const docked = dockedCompanionOf(parentTabId);
   if (docked) {
     useActivityBarStore.getState().activateTab(docked.id);
-    prefillSideChatDraft(docked.childTabId, text);
+    prefillSideChatDraft(docked.childTabId, text, title);
     return true;
   }
   try {
     const childTabId = await openSideChatTab(parentTabId, title);
     if (!childTabId) return false;
-    prefillSideChatDraft(childTabId, text);
+    prefillSideChatDraft(childTabId, text, title);
     return true;
   } catch {
     return false;

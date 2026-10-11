@@ -4,7 +4,7 @@
 // This module is the small hand-off between the two: the selection action
 // deposits text for one companion tab, and the panel takes it on mount, or
 // subscribes while it is already open.
-export type SideChatDraft = { id: number; text: string };
+export type SideChatDraft = { id: number; text: string; fromParent?: string };
 
 const pending = new Map<string, SideChatDraft>();
 const waiting = new Map<string, Set<(draft: SideChatDraft) => void>>();
@@ -15,10 +15,11 @@ let nextDraftId = 0;
  * mounted takes it immediately; otherwise the draft waits until the panel
  * mounts, which is the common case right after the selection opened it.
  */
-export function prefillSideChatDraft(tabId: string, text: string): void {
+export function prefillSideChatDraft(tabId: string, text: string, fromParent?: string): void {
   const trimmed = text.trim();
   if (!tabId || !trimmed) return;
-  const draft: SideChatDraft = { id: ++nextDraftId, text: trimmed };
+  const parent = fromParent?.trim();
+  const draft: SideChatDraft = { id: ++nextDraftId, text: trimmed, ...(parent ? { fromParent: parent } : {}) };
   const listeners = waiting.get(tabId);
   if (listeners && listeners.size > 0) {
     for (const listener of listeners) listener(draft);

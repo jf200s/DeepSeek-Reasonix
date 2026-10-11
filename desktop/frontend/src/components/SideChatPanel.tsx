@@ -11,7 +11,7 @@ import { app } from "../lib/bridge";
 import { useT } from "../lib/i18n";
 import { getTranscriptStore } from "../lib/transcriptStore";
 import { subscribeSideChatDraft, takeSideChatDraft, type SideChatDraft } from "../lib/sideChatDraft";
-import type { CollaborationMode, ToolApprovalMode } from "../lib/types";
+import type { CollaborationMode, ContextInfo, ToolApprovalMode } from "../lib/types";
 import { initialState, type Item, type State } from "../lib/useController";
 
 // The same decision cards the main area shows. They stay lazy so a companion
@@ -164,6 +164,29 @@ export const SideChatPanel = memo(function SideChatPanel({
     return unsubscribe;
   }, [tabId]);
 
+  // The context ring reads its window/used numbers from this prop, while the
+  // rest of its popover comes from the host call it makes itself. A companion
+  // is never the active main tab, so nothing else refreshes it: without this
+  // the ring and the popover header sit at 0/0 for the whole session while the
+  // request count and hit rate beside them show real values.
+  const running = state?.running ?? false;
+  const [context, setContext] = useState<ContextInfo | undefined>(undefined);
+  useEffect(() => {
+    let cancelled = false;
+    // Routed through a promise so a host without the command (older shell, test
+    // stub) degrades to "no live context" instead of throwing during mount.
+    void Promise.resolve()
+      .then(() => app.ContextUsageForTab(tabId))
+      .then((next) => {
+        if (cancelled) return;
+        setContext(next);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [tabId, running]);
+
   const [hostError, setHostError] = useState<string | null>(null);
   const runHost = (call: Promise<unknown>) => {
     call.catch((error) => setHostError(error instanceof Error ? error.message : String(error)));
@@ -231,7 +254,8 @@ export const SideChatPanel = memo(function SideChatPanel({
         </div>
       ) : null}
       <Composer
-        running={state?.running ?? false}
+        running={running}
+        context={context}
         collaborationMode={"normal" as CollaborationMode}
         toolApprovalMode={"ask" as ToolApprovalMode}
         goal=""

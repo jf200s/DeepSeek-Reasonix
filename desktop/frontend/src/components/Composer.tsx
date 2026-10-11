@@ -1871,21 +1871,21 @@ export function Composer({
     const normalized = normalizeSelectedText(selectedTextRequest.text);
     if (!normalized.text) return;
     if (normalized.truncated) showToast(t("composer.selectedTextTruncated"), "warn");
-    const path = selectedTextRequest.path;
-    const source = selectedTextRequest.source;
+    const { path, source, fromParent } = selectedTextRequest;
     const duplicate = selectedTextRefsRef.current.some(
       (reference) => reference.text === normalized.text
         && (reference.path ?? "") === (path ?? "")
-        && (reference.source ?? "") === (source ?? ""),
+        && (reference.source ?? "") === (source ?? "") && (reference.fromParent ?? "") === (fromParent ?? ""),
     );
     if (!duplicate) {
       const next = [
         ...selectedTextRefsRef.current,
         {
-          id: `${path ? "code" : source === "terminal" ? "terminal" : "chat"}-selection-${selectedTextRequest.id}`,
+          id: `${path ? "code" : source === "terminal" ? "terminal" : fromParent ? "parent" : "chat"}-selection-${selectedTextRequest.id}`,
           text: normalized.text,
           ...(path ? { path } : {}),
           ...(source ? { source } : {}),
+          ...(fromParent ? { fromParent } : {}),
         },
       ];
       selectedTextRefsRef.current = next;

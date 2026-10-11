@@ -3,6 +3,7 @@
 import {
   SELECTED_TEXT_MAX_CHARS,
   formatSelectedTextContext,
+  formatSelectionLabel,
   formatSelectionReference,
   normalizeSelectedText,
   parseSelectedTextContext,
@@ -71,6 +72,32 @@ eq(
   JSON.stringify([{ path: "src/lib/a.ts", text: "const x = 1;" }, { text: "plain quote" }, { text: "Error: boom" }]),
   "unknown future selection sources remain readable as generic quoted text",
 );
+const withParent = formatSelectedTextContext([
+  { id: "parent-1", text: " 操作出现问题 ", fromParent: "deepseek-flash" },
+]);
+ok(
+  withParent.includes('{"fromParent":"deepseek-flash","text":"操作出现问题"}'),
+  "a selection taken from another session's transcript names that session in the payload",
+);
+ok(
+  withParent.includes('Entries with "fromParent" were selected in a different session than this one'),
+  "the parent-session note says the excerpt was not said in this conversation",
+);
+eq(
+  JSON.stringify(parseSelectedTextContext(withParent)),
+  JSON.stringify([{ fromParent: "deepseek-flash", text: "操作出现问题" }]),
+  "parent-session origin round-trips through the persisted context parser",
+);
+ok(
+  !withSources.includes("fromParent"),
+  "ordinary chat selections keep byte-identical provider output",
+);
+eq(
+  formatSelectionLabel({ text: "操作出现问题", fromParent: "deepseek-flash" }),
+  "[From deepseek-flash: 操作出现问题]",
+  "the inline label names the session a parent excerpt came from",
+);
+
 eq(
   formatSelectionReference("src/a.ts", "const `x` = ```1```;\r\n"),
   'From "src/a.ts":\n\n````typescript\nconst `x` = ```1```;\n````',

@@ -3770,22 +3770,11 @@ a[href] {
   display: block;
   width: var(--welcome-brand-width);
   height: var(--welcome-brand-height);
-  object-fit: contain;
+  background-color: var(--accent);
+  -webkit-mask: url("./assets/logo-wordmark.svg") no-repeat center / contain;
+  mask: url("./assets/logo-wordmark.svg") no-repeat center / contain;
 }
 
-:root[data-theme="dark"] .sidebar__brand-logo,
-:root[data-theme="dark"] .welcome__brand-logo {
-  filter: brightness(0) invert(1);
-  opacity: 0.94;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-theme]) .sidebar__brand-logo,
-  :root:not([data-theme]) .welcome__brand-logo {
-    filter: brightness(0) invert(1);
-    opacity: 0.94;
-  }
-}
 .welcome__title {
   font-size: 22px;
   font-weight: 650;
@@ -25491,8 +25480,9 @@ body > .mermaid-diagram--fullscreen {
   width: 136px;
   height: 32px;
   margin-left: -21px;
-  object-fit: contain;
-  object-position: left center;
+  background-color: var(--accent);
+  -webkit-mask: url("./assets/logo-wordmark.svg") no-repeat left center / contain;
+  mask: url("./assets/logo-wordmark.svg") no-repeat left center / contain;
 }
 
 .sidebar__new {
@@ -30508,7 +30498,6 @@ body > .mermaid-diagram--fullscreen {
      glyph left so the R mark lines up with the 新建对话 icon edge
      (same content inset). Scale of base -21px @ 136px → ~-18px @ 118px. */
   margin-left: -18px;
-  object-position: left center;
 }
 
 .app--creation .sidebar__new,
