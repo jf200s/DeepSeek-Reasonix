@@ -36,6 +36,7 @@ const sameReferences = (a: readonly unknown[] = [], b: readonly unknown[] = []) 
   a.length === b.length && a.every((item, index) => item === b[index]);
 const shallowSame = (a: object, b: object) => Object.keys(a).length === Object.keys(b).length
   && Object.entries(a).every(([key, value]) => value === (b as Record<string, unknown>)[key]);
+const HEAD_KEY = "history-head";
 const foldViews = new Map<string, Map<string, boolean>>();
 const emptyChildren: readonly Extract<ChatNode, { kind: "tool" }>[] = [];
 function proxyAuditCall(item: Item): string | undefined {
@@ -110,6 +111,7 @@ export class ChatSource implements ChatViewSource {
   private input?: ChatInput;
   private status: ChatStatus = { running: false, hydrating: true, hasOlder: false, loadingOlder: false };
   private choices = new Map<string, boolean>();
+  private headAnchor?: string;
   private displayKeyBySubmission = new Map<string, string>();
   private displayMessageBySubmission = new Map<string, string>();
   private displayKeyByMessage = new Map<string, string>();
@@ -157,7 +159,7 @@ export class ChatSource implements ChatViewSource {
     const order: string[] = [];
     const present = new Set<string>();
     const groups: Array<{ key: string; turn?: number; user?: Extract<Item, { kind: "user" }>; items: Item[] }> = [];
-    let group: (typeof groups)[number] = { key: "history-head", items: [] };
+    let group: (typeof groups)[number] = { key: HEAD_KEY, items: [] };
     groups.push(group);
     for (const { item, local } of itemsWithLocalSubmissions(input)) {
       if (item.kind === "user") {
@@ -167,6 +169,7 @@ export class ChatSource implements ChatViewSource {
       } else group.items.push(item);
     }
     const groupKeys = new Set(groups.map(current => current.key));
+    this.adoptHeadChoice(groups);
     for (const current of groups) {
       if (!current.user && !current.items.length) continue;
       const turnKey = current.key;
@@ -209,7 +212,7 @@ export class ChatSource implements ChatViewSource {
       const hasTrailingWork = current.items.slice(answerIndex + 1).some(item => item.kind === "tool" || item.kind === "phase" || item.kind === "assistant");
       // Every ended turn can fold by hand; only a settled one starts folded.
       const settled = Boolean(answer && !hasTrailingWork && !failed && !current.user?.failed);
-      const foldable = Boolean(hasProcess && current.user && !active);
+      const foldable = Boolean(hasProcess && !active);
       const allCalls = current.items.filter((item): item is Extract<Item, { kind: "tool" }> => item.kind === "tool");
       const calls = allCalls.filter(item => !item.parentId);
       const subagentCount = calls.filter(item => ["task", "read_only_task", "parallel_tasks", "fleet", "subagent"].includes(item.name)).length;
@@ -269,6 +272,16 @@ export class ChatSource implements ChatViewSource {
     for (const key of this.choices.keys()) if (!groupKeys.has(key)) this.choices.delete(key);
     if (!sameKeys(this.order, order)) { this.order = order; this.orderDirty = true; }
     recordFrontendDiagnostic("transcript", "presentation", this.presentationStats());
+  }
+  // The head group is a turn whose user message sits on an older page; once
+  // that page loads the same items sit under the user's key.
+  private adoptHeadChoice(groups: ReadonlyArray<{ key: string; user?: unknown; items: readonly Item[] }>) {
+    const head = groups[0];
+    const anchor = this.headAnchor;
+    this.headAnchor = head.key === HEAD_KEY ? head.items[0]?.id : undefined;
+    if (!anchor || !this.choices.has(HEAD_KEY) || (head.key === HEAD_KEY && head.items[0]?.id === anchor)) return;
+    const next = groups.find(current => current.user && current.items.some(item => item.id === anchor));
+    if (next) this.choices.set(next.key, this.choices.get(HEAD_KEY)!);
   }
   private userDisplayKey(item: Extract<Item, { kind: "user" }>, local?: LocalSubmission, handoffs?: ChatInput["visibleSubmissionHandoffs"]): string {
     if (local) {

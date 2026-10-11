@@ -8,8 +8,8 @@ name: Release desktop
 # build/ fans out to one native runner per platform. Artifacts are
 # minisign-signed (MINISIGN_* secrets), a latest.json manifest is generated, and
 # everything is published to a GitHub release and mirrored to R2 (the updater
-# reads R2 first, then the crash worker release gateway; stable desktop releases
-# own GitHub's repository-wide "latest").
+# reads R2 first, then the crash worker release gateway; no desktop release
+# claims GitHub's repository-wide "latest").
 #
 # Historical workflow-call inputs still understand Preview artifacts so old
 # runs remain diagnosable. They are not exposed by manual dispatch and cannot
@@ -1237,8 +1237,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           DESKTOP_MANUAL_ONLY: ${{ inputs.desktop_manual_only || false }}
-        # Keep the repository homepage focused on the installable desktop app;
-        # the CLI release line is configured not to claim repository-wide latest.
+        # Desktop releases never claim repository-wide latest; the updater
+        # reads R2 and the release gateway, not GitHub's latest shortcut.
         run: >-
           bash release-control/scripts/publish-desktop-github-release.sh
           "${{ needs.resolve.outputs.tag }}"

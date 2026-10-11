@@ -14,10 +14,29 @@ const inboxBridgeErrorPrefix = "reasonix_error:"
 type inboxCodedError struct {
 	code  string
 	cause error
+	// transient marks a fence that clears by itself (session switching,
+	// reconnecting, route adoption). Callers keep the message and retry
+	// instead of failing it with an unrecoverable-looking error.
+	transient bool
 }
 
 func (e *inboxCodedError) Error() string { return inboxBridgeErrorPrefix + e.code }
 func (e *inboxCodedError) Unwrap() error { return e.cause }
+
+// RPCErrorData lets the renderer branch on a transient fence without parsing
+// the message text.
+func (e *inboxCodedError) RPCErrorData() map[string]any {
+	if e.transient {
+		return map[string]any{"transient": true}
+	}
+	return nil
+}
+
+// inboxTargetTransient reports a fence that settles by itself: the message was
+// not submitted and the same request will land once the tab settles.
+func inboxTargetTransient(cause error) error {
+	return &inboxCodedError{code: inboxTransientCode, cause: cause, transient: true}
+}
 
 // inboxBridgeError keeps backend errors machine-stable across the desktop bridge.
 // The frontend translates known product states at display time; unknown errors

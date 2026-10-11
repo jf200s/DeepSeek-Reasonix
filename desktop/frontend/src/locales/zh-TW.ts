@@ -2944,6 +2944,7 @@ export const zhTW: Record<DictKey, string> = {
   "composer.sessionContextReadFailed": "注意：該會話讀取失敗，已略過。",
   "composer.attachImageFailed": "圖片貼上失敗",
   "composer.attachFileFailed": "檔案附加失敗",
+  "composer.attachTooLarge": "{name} 過大，無法附加（上限 {limit} MB）",
   "composer.attachDropFailed": "拖放檔案附加失敗",
   "composer.pasteImageFailed": "未能讀取剪貼簿圖片",
   "status.ctxLabel": "上下文",

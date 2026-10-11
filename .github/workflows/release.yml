@@ -559,17 +559,14 @@ jobs:
           ' latest.json >/dev/null
           gh release upload "$TAG" latest.json --clobber
 
-      # The compatibility asset exists for pre-v1.16 desktop updaters that
-      # still poll GitHub's repository-wide latest URL. Desktop releases now
-      # own that Latest badge, but this check still exercises the public fallback
-      # path exactly the way those clients fetch it: anonymously, over the public
-      # edge, with a Go client UA. Unlike dl.reasonix.io (whose bot protection
-      # 403s Actions egress — see the R2 note above), GitHub serves its own
-      # runners, so this can hard-fail. #5826/#5858 shipped a broken update check
-      # for weeks precisely because nothing exercised the public path. Retries
-      # cover the release CDN propagating the freshly uploaded asset.
-      - name: Smoke public compatibility manifest
+      # Verifies what the CLI release actually serves after the compatibility
+      # upload: exactly the approved asset set, each uploaded, with the size and
+      # sha256 digest GitHub recorded, SHA256SUMS downloaded from the release,
+      # and the compatibility latest.json byte-identical to the one uploaded
+      # above. Any mismatch or API failure fails the job.
+      - name: Verify published CLI release assets
         env:
+          GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.resolve.outputs.tag }}
           HAS_R2: ${{ secrets.R2_ACCESS_KEY_ID != '' && secrets.R2_SECRET_ACCESS_KEY != '' && secrets.R2_ACCOUNT_ID != '' && secrets.R2_BUCKET != '' }}
         run: |
@@ -584,18 +581,19 @@ jobs:
             echo "R2 secrets not configured; no compatibility asset uploaded; skipping"
             exit 0
           fi
-          url="https://github.com/${{ github.repository }}/releases/latest/download/latest.json"
-          for attempt in 1 2 3 4 5 6; do
-            if curl -fsSL -A "Go-http-client/2.0" -o /tmp/compat-latest.json "$url"; then
-              jq -e '(.version | type == "string") and (.platforms | type == "object")' /tmp/compat-latest.json >/dev/null
-              echo "public compatibility manifest OK (desktop version $(jq -r .version /tmp/compat-latest.json))"
-              exit 0
-            fi
-            echo "attempt $attempt failed; retrying in 10s"
-            sleep 10
-          done
-          echo "::error::public compatibility manifest unreachable at $url"
-          exit 1
+          release_json=/tmp/published-cli-release.json
+          checksums=/tmp/published-cli-SHA256SUMS
+          gh api "repos/${{ github.repository }}/releases/tags/$TAG" >"$release_json"
+          gh release download "$TAG" -R "${{ github.repository }}" \
+            --pattern SHA256SUMS --output "$checksums" --clobber
+          decision="$(bash release-control/scripts/decide-cli-release-publication.sh \
+            stable "$TAG" "${{ github.repository }}" "$release_json" "$checksums")"
+          test "$decision" = "reuse"
+          jq -e '[.assets[].name] | index("latest.json") != null' "$release_json" >/dev/null
+          want="sha256:$(sha256sum latest.json | cut -d' ' -f1)"
+          got="$(jq -r '.assets[] | select(.name == "latest.json") | .digest' "$release_json")"
+          test "$want" = "$got"
+          echo "published CLI release $TAG assets verified against SHA256SUMS and the uploaded manifest"
 
       # A stable CLI release must never leave the npm line behind: v1.17.5
       # shipped as binaries/Homebrew while npm `latest` still pointed at 0.53.2

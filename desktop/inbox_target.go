@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -9,6 +10,15 @@ import (
 
 	"reasonix/internal/sessioninbox"
 )
+
+// inboxTransientCode is the bridge code for a transient inbox-target fence;
+// the renderer keeps the message queued and retries it automatically.
+const inboxTransientCode = "inbox_target_transient"
+
+// errInboxTargetChanged is the transient identity/route fence: the tab is
+// switching, reconnecting or re-aiming, and the same call succeeds once it
+// settles. Boundaries classify it as inbox_target_transient.
+var errInboxTargetChanged = errors.New("inbox target changed")
 
 // InboxTargetView fences follow-ups across both local replacement and remote
 // selection changes. It is process-local and never written to the inbox ledger.
@@ -34,7 +44,11 @@ func inboxTabIdentity(tab *WorkspaceTab) string {
 func (a *App) CaptureInboxTarget(tabID, expectedPath string) (InboxTargetView, error) {
 	a.runtimeAdmissionMu.RLock()
 	defer a.runtimeAdmissionMu.RUnlock()
-	return a.captureInboxTarget(tabID, expectedPath)
+	target, err := a.captureInboxTarget(tabID, expectedPath)
+	if errors.Is(err, errInboxTargetChanged) {
+		return InboxTargetView{}, inboxTargetTransient(err)
+	}
+	return target, err
 }
 
 func (a *App) captureInboxTarget(tabID, expectedPath string) (InboxTargetView, error) {
@@ -43,7 +57,7 @@ func (a *App) captureInboxTarget(tabID, expectedPath string) (InboxTargetView, e
 	if remote != nil {
 		defer a.remoteTabMu.Unlock()
 		if remote.state != "ready" || remote.client == nil || remote.routing.rehydratingPath != "" || remote.routing.currentPath == "" || remote.routing.currentPath != expectedPath {
-			return InboxTargetView{}, fmt.Errorf("inbox target changed")
+			return InboxTargetView{}, errInboxTargetChanged
 		}
 		return InboxTargetView{TabID: tabID, SessionPath: expectedPath, Generation: remote.gen, Selection: remote.selectionRevision,
 			Remote: true, HostID: remote.ref.HostID, Workspace: remote.ref.Workspace}, nil
@@ -56,7 +70,7 @@ func (a *App) captureInboxTarget(tabID, expectedPath string) (InboxTargetView, e
 			return InboxTargetView{TabID: tabID, SessionPath: expectedPath, Generation: tab.SessionGeneration}, nil
 		}
 	}
-	return InboxTargetView{}, fmt.Errorf("inbox target changed")
+	return InboxTargetView{}, errInboxTargetChanged
 }
 
 func (a *App) remoteInboxTarget(target InboxTargetView) (*http.Client, string, error) {
@@ -64,7 +78,7 @@ func (a *App) remoteInboxTarget(target InboxTargetView) (*http.Client, string, e
 	defer a.remoteTabMu.Unlock()
 	tab := a.remoteTabs[target.TabID]
 	if tab == nil || tab.client == nil || tab.state != "ready" || tab.gen != target.Generation || tab.selectionRevision != target.Selection || tab.routing.currentPath != target.SessionPath || tab.routing.rehydratingPath != "" || (target.HostID != "" && (tab.ref.HostID != target.HostID || tab.ref.Workspace != target.Workspace)) {
-		return nil, "", fmt.Errorf("inbox target changed")
+		return nil, "", errInboxTargetChanged
 	}
 	return tab.client, tab.base, nil
 }
@@ -77,6 +91,9 @@ func (a *App) EnqueueInboxFollowupForTarget(target InboxTargetView, display, sub
 	if target.Remote {
 		client, base, err := a.remoteInboxTarget(target)
 		if err != nil {
+			if errors.Is(err, errInboxTargetChanged) {
+				return InboxReceiptView{}, inboxTargetTransient(err)
+			}
 			return InboxReceiptView{}, inboxNotSubmitted(err)
 		}
 		return a.enqueueRemoteFollowupAt(client, base, target.SessionPath, display, submit, invocations, key)
@@ -85,7 +102,10 @@ func (a *App) EnqueueInboxFollowupForTarget(target InboxTargetView, display, sub
 	defer a.runtimeAdmissionMu.RUnlock()
 	current, err := a.captureInboxTarget(target.TabID, target.SessionPath)
 	if err != nil || current != target {
-		return InboxReceiptView{}, inboxNotSubmitted(fmt.Errorf("inbox target changed"))
+		if err != nil && !errors.Is(err, errInboxTargetChanged) {
+			return InboxReceiptView{}, inboxNotSubmitted(err)
+		}
+		return InboxReceiptView{}, inboxTargetTransient(errInboxTargetChanged)
 	}
 	ctrl, err := a.inboxCtrl(target.TabID)
 	if err != nil {

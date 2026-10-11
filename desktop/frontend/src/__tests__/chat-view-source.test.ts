@@ -53,7 +53,7 @@ assert.ok(source.getOrderSnapshot().includes("warning"));
 source.update({ ...input, items: [settled[1]], running: false });
 await Promise.resolve();
 const incomplete = source.getNodeSnapshot("history-head:process");
-assert.ok(incomplete?.kind === "process" && !incomplete.foldable, "a group without its user message has no fold seat");
+assert.ok(incomplete?.kind === "process" && incomplete.foldable, "a group without its user message still has a fold seat");
 source.update(input);
 source.dispose();
 const notified = active;

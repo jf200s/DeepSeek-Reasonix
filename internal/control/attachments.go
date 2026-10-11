@@ -27,6 +27,18 @@ const maxImageAttachmentBytes = 64 * 1024 * 1024
 const maxFileAttachmentBytes = 25 * 1024 * 1024
 const maxAttachmentCreateAttempts = 1000
 
+// ErrAttachmentTooLarge and ErrImageTooLarge mark a payload over its size cap.
+var (
+	ErrAttachmentTooLarge = errors.New("attachment must be between 1 byte and 25 MB")
+	ErrImageTooLarge      = errors.New("pasted image must be between 1 byte and 64 MB")
+)
+
+// base64DecodedCeiling bounds the decoded size from the encoded length alone,
+// so an oversized payload is refused before the decode buffer exists.
+func base64DecodedCeiling(encodedLen int) int {
+	return encodedLen / 4 * 3
+}
+
 // ErrNoClipboardImage reports that the clipboard was read successfully but holds
 // no supported image. It is distinct from a missing clipboard tool: callers
 // offering an image-first paste shortcut use it to fall back to text before
@@ -83,6 +95,9 @@ func SaveAttachmentDataURLInRoot(root, origName, dataURL string) (string, error)
 	if !strings.HasPrefix(dataURL, "data:") || !ok {
 		return "", fmt.Errorf("unsupported pasted file")
 	}
+	if base64DecodedCeiling(len(after)) > maxFileAttachmentBytes+2 {
+		return "", ErrAttachmentTooLarge
+	}
 	raw, err := base64.StdEncoding.DecodeString(after)
 	if err != nil {
 		return "", fmt.Errorf("decode pasted file: %w", err)
@@ -96,7 +111,7 @@ func SaveAttachmentBytes(origName string, raw []byte) (string, error) {
 
 func SaveAttachmentBytesInRoot(root, origName string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
-		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+		return "", ErrAttachmentTooLarge
 	}
 	ext := strings.ToLower(filepath.Ext(origName))
 	if !safeAttachmentExt.MatchString(ext) {
@@ -120,6 +135,9 @@ func SaveImageDataURLInRoot(root, dataURL string) (string, error) {
 		return "", fmt.Errorf("unsupported pasted image")
 	}
 	mime := strings.ToLower(dataURL[len(prefix):i])
+	if base64DecodedCeiling(len(dataURL)-i-len(marker)) > maxImageAttachmentBytes+2 {
+		return "", ErrImageTooLarge
+	}
 	raw, err := base64.StdEncoding.DecodeString(dataURL[i+len(marker):])
 	if err != nil {
 		return "", fmt.Errorf("decode pasted image: %w", err)
@@ -133,7 +151,7 @@ func SaveImageBytes(declaredMime string, raw []byte) (string, error) {
 
 func SaveImageBytesInRoot(root, declaredMime string, raw []byte) (string, error) {
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("pasted image must be between 1 byte and 64 MB")
+		return "", ErrImageTooLarge
 	}
 	mime := detectedImageMime(raw)
 	if mime == "" {
@@ -190,7 +208,7 @@ func SaveImageFileInRoot(root, path string) (string, error) {
 		return "", fmt.Errorf("pasted image path must not be a symlink")
 	}
 	if info.IsDir() || info.Size() <= 0 || info.Size() > maxImageAttachmentBytes {
-		return "", fmt.Errorf("pasted image must be between 1 byte and 64 MB")
+		return "", ErrImageTooLarge
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -209,7 +227,7 @@ func SaveImageFileInRoot(root, path string) (string, error) {
 		return "", err
 	}
 	if len(raw) == 0 || len(raw) > maxImageAttachmentBytes {
-		return "", fmt.Errorf("pasted image must be between 1 byte and 64 MB")
+		return "", ErrImageTooLarge
 	}
 	if after, err := f.Stat(); err != nil {
 		return "", err
@@ -232,7 +250,7 @@ func SaveAttachmentFileInRoot(root, path string) (string, error) {
 		return "", fmt.Errorf("attachment path must not be a symlink")
 	}
 	if info.IsDir() || info.Size() <= 0 || info.Size() > maxFileAttachmentBytes {
-		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+		return "", ErrAttachmentTooLarge
 	}
 	f, err := os.Open(path)
 	if err != nil {
@@ -251,7 +269,7 @@ func SaveAttachmentFileInRoot(root, path string) (string, error) {
 		return "", err
 	}
 	if len(raw) == 0 || len(raw) > maxFileAttachmentBytes {
-		return "", fmt.Errorf("attachment must be between 1 byte and 25 MB")
+		return "", ErrAttachmentTooLarge
 	}
 	if after, err := f.Stat(); err != nil {
 		return "", err

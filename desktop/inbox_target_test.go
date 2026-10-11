@@ -141,7 +141,7 @@ func TestRemoteInboxTargetLostReceiptOnlyQueriesOriginalRequest(t *testing.T) {
 			} else if lookupErr != nil || lookups != before+1 {
 				t.Fatalf("same-session read did not recover after reconnect: %v", lookupErr)
 			}
-			if _, err := a.EnqueueInboxFollowupForTarget(target, "new", "new", nil, "new"); err == nil || !strings.Contains(err.Error(), "inbox_not_submitted") {
+			if _, err := a.EnqueueInboxFollowupForTarget(target, "new", "new", nil, "new"); err == nil || !strings.Contains(err.Error(), "inbox_target_transient") {
 				t.Fatalf("stale target was not explicitly rejected: %v", err)
 			}
 			if posts != 1 {

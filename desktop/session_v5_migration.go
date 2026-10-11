@@ -273,7 +273,8 @@ func (a *App) desktopHistoricalRoots() (map[string]*desktopMigrationSource, map[
 		key := canonicalRuntimeRoot(dir)
 		source, ok := legacySources[key]
 		if !ok {
-			source = desktopMigrationSource{root: dir, scope: tab.Scope, workspaceRoot: tab.WorkspaceRoot, exact: map[string]bool{}, pairedRoot: filepath.Join(filepath.Dir(dir), "sessions-v4")}
+			scope, workspaceRoot := desktopTabLegacyScope(tab, path, dir)
+			source = desktopMigrationSource{root: dir, scope: scope, workspaceRoot: workspaceRoot, exact: map[string]bool{}, pairedRoot: filepath.Join(filepath.Dir(dir), "sessions-v4")}
 		}
 		source.exact[path] = true
 		legacySources[key] = source
@@ -284,6 +285,17 @@ func (a *App) desktopHistoricalRoots() (map[string]*desktopMigrationSource, map[
 		addStores(source.scope, source.workspaceRoot, source.pairedRoot)
 	}
 	return sources, legacySources
+}
+
+// A directory no registered scope owns belongs to the project whose session
+// directory it is. The session's own recorded root proves that; the saved tab's
+// scope does not, since the tab may have been rebound after the file was written.
+func desktopTabLegacyScope(tab desktopTabEntry, path, dir string) (scope, workspaceRoot string) {
+	meta, exists, err := agent.LoadBranchMetaBounded(context.Background(), path)
+	if err == nil && exists && strings.TrimSpace(meta.WorkspaceRoot) != "" && sameDesktopPath(desktopSessionDir(meta.WorkspaceRoot), dir) {
+		return "project", meta.WorkspaceRoot
+	}
+	return tab.Scope, tab.WorkspaceRoot
 }
 
 // A paired checkpoint and event store are one migration decision. Never

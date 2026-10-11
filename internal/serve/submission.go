@@ -62,7 +62,7 @@ func (s *Server) submit(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, err.Error(), http.StatusConflict)
 			return
 		}
-		http.Error(w, "session is busy; use POST /inbox/items for durable follow-up", http.StatusConflict)
+		http.Error(w, SubmitBusyMessage+"; use POST /inbox/items for durable follow-up", http.StatusConflict)
 		return
 	}
 	if body.Action == control.ProtocolRecoveryAction {

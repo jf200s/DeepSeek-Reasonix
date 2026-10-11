@@ -1202,16 +1202,52 @@ func (s *Server) resumeIdentitySession(w http.ResponseWriter, r *http.Request, h
 		http.Error(w, "session identity protocol is unavailable", http.StatusConflict)
 		return
 	}
-	if controllerHasActiveRuntimeWork(ctrl) {
-		http.Error(w, "cannot switch session while active work or background jobs are running", http.StatusConflict)
+	if hostID == "" {
+		if current, bound := ctrl.SessionRef(); bound {
+			hostID = current.HostID
+		}
+	}
+	ref := session.SessionRef{HostID: hostID, SessionID: strings.TrimSpace(sessionID)}
+	// A session backgrounded by a busy switch keeps its controller, live turn
+	// and buffered frames; promote it instead of opening a second runtime.
+	if detached := s.takeDetached(remoteSessionIDQueryPrefix + ref.SessionID); detached != nil {
+		if err := s.reattachDetached(ctrl, detached); err != nil {
+			s.renderBindError(w, err)
+			return
+		}
+		s.announceSessionChanged("", false)
+		w.Header().Set(sessionIDHeader, ref.SessionID)
+		w.WriteHeader(http.StatusNoContent)
+		s.replayPendingPromptsBroadcast()
 		return
 	}
-	current, bound := ctrl.SessionRef()
-	hostID = strings.TrimSpace(hostID)
-	if hostID == "" && bound {
-		hostID = current.HostID
+	if current, bound := ctrl.SessionRef(); bound && current.SessionID == ref.SessionID {
+		// Re-selecting the running foreground session is not a switch.
+		w.Header().Set(sessionIDHeader, ref.SessionID)
+		w.WriteHeader(http.StatusNoContent)
+		return
 	}
-	ref, err := ctrl.OpenSession(r.Context(), session.SessionRef{HostID: hostID, SessionID: strings.TrimSpace(sessionID)})
+	if controllerHasActiveRuntimeWork(ctrl) {
+		// Mirror the legacy path flow: background the busy controller and bring
+		// the target to the foreground, so switching never drops the running
+		// turn nor stalls the target's history load.
+		if err := s.busySwitchIdentity(r.Context(), ctrl, ref); err != nil {
+			if !errors.Is(err, errIdentityServiceUnavailable) {
+				s.renderBindError(w, err)
+				return
+			}
+			// This host cannot build an identity-capable replacement; keep the
+			// historical refusal rather than dropping the running controller.
+			http.Error(w, "cannot switch session while active work or background jobs are running", http.StatusConflict)
+			return
+		}
+		s.announceSessionChanged("", false)
+		w.Header().Set(sessionIDHeader, ref.SessionID)
+		w.WriteHeader(http.StatusNoContent)
+		s.replayPendingPromptsBroadcast()
+		return
+	}
+	ref, err := ctrl.OpenSession(r.Context(), ref)
 	if err != nil {
 		// A local runtime owns the writer: mount the caller as a read-only
 		// spectator instead of failing the attach — the same contract the

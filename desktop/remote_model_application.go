@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 
 	"reasonix/internal/control"
 )
@@ -98,7 +99,7 @@ func (a *App) SubmitRemoteTabWithModelApplication(tabID, text, submissionID stri
 	if !supported {
 		return &submissionNotAcceptedError{cause: fmt.Errorf("upgrade Serve to use model application recovery")}
 	}
-	client, base, path, err := a.remoteTabCommandTarget(tabID)
+	_, _, path, err := a.remoteTabCommandTarget(tabID)
 	if err != nil {
 		return err
 	}
@@ -117,9 +118,11 @@ func (a *App) SubmitRemoteTabWithModelApplication(tabID, text, submissionID stri
 	if err != nil {
 		return err
 	}
-	ctx, cancel := commandContext(a)
-	defer cancel()
-	err = servePostForSession(ctx, client, serveURL(base, "/submit"), body, path)
+	err = a.submitWithRouteRetry(tabID, func(client *http.Client, base, expectedPath string) error {
+		ctx, cancel := commandContext(a)
+		defer cancel()
+		return servePostForSession(ctx, client, serveURL(base, "/submit"), body, expectedPath)
+	})
 	var detailed interface{ RPCErrorData() map[string]any }
 	if errors.As(err, &detailed) {
 		if raw, marshalErr := json.Marshal(detailed.RPCErrorData()["modelApplication"]); marshalErr == nil {
@@ -135,6 +138,13 @@ func (a *App) SubmitRemoteTabWithModelApplication(tabID, text, submissionID stri
 				}
 				a.remoteTabMu.Unlock()
 			}
+		}
+	}
+	if remoteBusySubmitError(err) {
+		// Busy submissions become durable follow-ups. The queue does not carry
+		// the per-submit model application choice; the message remains queued.
+		if queued, queueErr := a.queueBusyFollowup(tabID, text, submissionID); queueErr == nil {
+			return queued
 		}
 	}
 	return err

@@ -48,3 +48,8 @@ export function persistentSnapshot(draft: ComposerDraft): PersistentComposerDraf
     selectedTextRefs: draft.selectedTextRefs,
   };
 }
+
+export function composerDraftFingerprint(draft: ComposerDraft): string {
+  return JSON.stringify([draft.text, draft.invocations, draft.attachments, draft.workspaceRefs,
+    draft.sessionRefs, draft.selectedTextRefs, draft.pastedBlocks]);
+}

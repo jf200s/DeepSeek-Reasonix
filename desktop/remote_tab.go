@@ -641,49 +641,6 @@ func (a *App) ReclaimRemoteTabSession(tabID string) error {
 	return nil
 }
 
-func (a *App) SubmitRemoteTab(tabID, text string) error {
-	return a.SubmitRemoteTabWithSubmission(tabID, text, "")
-}
-
-func (a *App) SubmitRemoteTabWithSubmission(tabID, text, submissionID string) error {
-	// Report the connection state before capability negotiation so a tab that
-	// has not finished bootstrap is never misdiagnosed as a legacy Serve.
-	if _, _, _, err := a.remoteTabCommandTarget(tabID); err != nil {
-		return err
-	}
-	if err := a.requireRemoteExecutionProtocol(tabID); err != nil {
-		return err
-	}
-	if err := a.requireRemotePermissionPresets(tabID); err != nil {
-		return err
-	}
-	if a.remoteModelApplicationReady(tabID) {
-		return a.SubmitRemoteTabWithModelApplication(tabID, text, submissionID, control.ModelApplicationChoice{Mode: "latest"})
-	}
-	for {
-		revision, admittedGen, err := a.ensureRemoteModelSettings(tabID)
-		if err != nil {
-			return &submissionNotAcceptedError{cause: err}
-		}
-		client, base, expectedPath, err := a.remoteTabCommandTarget(tabID)
-		if err != nil {
-			return err
-		}
-		if !a.remoteTabAdmissionCurrent(tabID, admittedGen) {
-			continue
-		}
-		ctx, cancel := commandContext(a)
-		input := map[string]string{"input": text}
-		if submissionID != "" {
-			input["submissionId"] = submissionID
-		}
-		body, _ := json.Marshal(input)
-		err = servePostForSession(ctx, client, serveURL(base, "/submit"), body, expectedPath, revision)
-		cancel()
-		return err
-	}
-}
-
 func (a *App) CancelRemoteTab(tabID string) error {
 	if err := a.requireRemoteExecutionProtocol(tabID); err != nil {
 		return err

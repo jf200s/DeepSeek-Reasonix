@@ -10636,10 +10636,10 @@
     }
   },
   "SubmitRemoteTab": {
-    "domain": "desktop/remote_tab.go",
+    "domain": "desktop/remote_submit.go",
     "owner": "App.SubmitRemoteTab",
     "sources": [
-      "desktop/remote_tab.go"
+      "desktop/remote_submit.go"
     ],
     "scope": {
       "kind": "owner-inputs",
@@ -10700,10 +10700,10 @@
     }
   },
   "SubmitRemoteTabWithSubmission": {
-    "domain": "desktop/remote_tab.go",
+    "domain": "desktop/remote_submit.go",
     "owner": "App.SubmitRemoteTabWithSubmission",
     "sources": [
-      "desktop/remote_tab.go"
+      "desktop/remote_submit.go"
     ],
     "scope": {
       "kind": "owner-inputs",

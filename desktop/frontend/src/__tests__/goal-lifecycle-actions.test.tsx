@@ -1,11 +1,6 @@
 // Run: tsx src/__tests__/goal-lifecycle-actions.test.tsx
 
 import { JSDOM } from "jsdom";
-import React from "react";
-import { act } from "react";
-import { createRoot } from "react-dom/client";
-import { GoalLifecycleActions } from "../components/GoalLifecycleActions";
-import { LocaleProvider } from "../lib/i18n";
 
 const dom = new JSDOM("<!doctype html><html><body><div id=\"root\"></div></body></html>", { url: "http://localhost/" });
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
@@ -14,10 +9,16 @@ globalThis.document = dom.window.document;
 globalThis.HTMLElement = dom.window.HTMLElement;
 globalThis.Event = dom.window.Event;
 
+const React = await import("react");
+const { act } = React;
+const { createRoot } = await import("react-dom/client");
+const { GoalLifecycleActions } = await import("../components/GoalLifecycleActions");
+const { LocaleProvider } = await import("../lib/i18n");
+
 let edit: { objective: string; maxGoalRounds: number | null } | undefined;
 let paused = 0;
-const prompts = ["finish the migration safely", "12"];
-window.prompt = () => prompts.shift() ?? null;
+window.prompt = () => { throw new Error("prompt() is not supported."); };
+window.alert = () => { throw new Error("alert() is not supported."); };
 
 await act(async () => {
   createRoot(document.getElementById("root")!).render(
@@ -45,7 +46,28 @@ const pauseButton = buttons.find((button) => button.textContent === "Pause goal"
 if (!editButton || !pauseButton) throw new Error("active goal lifecycle actions did not render");
 if (pauseButton.disabled) throw new Error("running automatic Goal round is not pausable");
 
+const setValue = async (el: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+  const proto = el instanceof dom.window.HTMLTextAreaElement ? dom.window.HTMLTextAreaElement.prototype : dom.window.HTMLInputElement.prototype;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(proto, "value")!.set!.call(el, value);
+    el.dispatchEvent(new dom.window.Event("input", { bubbles: true }));
+  });
+};
+
 await act(async () => { editButton.click(); });
+const objectiveInput = document.querySelector<HTMLTextAreaElement>("[data-goal-edit-objective]");
+const roundsInput = document.querySelector<HTMLInputElement>("[data-goal-edit-rounds]");
+if (!objectiveInput || !roundsInput) throw new Error("edit goal did not open an in-app form");
+if (objectiveInput.value !== "finish the migration") throw new Error("objective not prefilled");
+await setValue(roundsInput, "0");
+const form = document.querySelector<HTMLFormElement>("form[data-goal-edit-form]")!;
+await act(async () => { form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+if (edit) throw new Error("invalid rounds must not submit");
+if (!document.querySelector("[data-goal-edit-error]")) throw new Error("invalid rounds error not shown");
+await setValue(objectiveInput, "finish the migration safely");
+await setValue(roundsInput, "12");
+await act(async () => { form.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+if (document.querySelector("form[data-goal-edit-form]")) throw new Error("form should close after save");
 if (edit?.objective !== "finish the migration safely" || edit.maxGoalRounds !== 12) {
   throw new Error(`edit action returned ${JSON.stringify(edit)}`);
 }

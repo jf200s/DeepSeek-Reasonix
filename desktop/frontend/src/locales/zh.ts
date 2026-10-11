@@ -1089,6 +1089,7 @@ export const zh: Record<DictKey, string> = {
   "imageViewer.title": "图片预览",
   "composer.attachImageFailed": "图片粘贴失败",
   "composer.attachFileFailed": "文件附加失败",
+  "composer.attachTooLarge": "{name} 过大，无法附加（上限 {limit} MB）",
   "composer.attachDropFailed": "拖放文件附加失败",
   "composer.pasteImageFailed": "未能读取剪贴板图片",
   "composer.imageInputUnsupported": "当前模型不会直接接收图片。请在设置中配置图片理解模型，或切换到支持图片的模型；也可让 OCR/识图 MCP 工具读取附件路径。",

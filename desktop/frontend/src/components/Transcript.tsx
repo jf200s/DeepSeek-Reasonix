@@ -269,6 +269,23 @@ function ChatSession(props: TranscriptProps & { sessionKey: string }) {
       if (result === "loaded" && current()) scroll.toBottom();
     } finally { release(); }
   };
+  const newerArmed = useRef(true);
+  const autoNewer = useRef<() => void>(() => undefined);
+  autoNewer.current = () => {
+    if (!onLoadNewerHistory || selectionInsideTranscript()) return;
+    newerArmed.current = false;
+    const intent = ++navigationIntent.current;
+    const generation = lifetime.current;
+    let reading = false;
+    const release = scroll.subscribeReaderIntent(() => { reading = true; });
+    const current = () => !reading && intent === navigationIntent.current && generation === lifetime.current && !selectionRef.current();
+    scroll.stopFollowing();
+    void loadPage("newer", "auto-fill", current).finally(release);
+  };
+  useEffect(() => {
+    if (!hasNewerHistory || !position.following) { newerArmed.current = true; return; }
+    if (newerArmed.current && !hydrating && !loadingNewerHistory && !newerHistoryError) autoNewer.current();
+  }, [hasNewerHistory, position.following, hydrating, loadingNewerHistory, newerHistoryError]);
   useEffect(() => () => jump.dispose(), [jump]);
   useEffect(() => desktopHost().native.onServiceState(state => {
     if (state.phase === "stopping" || state.phase === "exited") {

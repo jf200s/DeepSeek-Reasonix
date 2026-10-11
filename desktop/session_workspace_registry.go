@@ -277,7 +277,8 @@ func (a *App) attachDesktopSession(ctx context.Context, scope, workspaceRoot str
 			}
 			if !adopted {
 				if fingerprint, err := desktopSourceFingerprint(source.Path); err == nil {
-					if err := a.recordDesktopSource(ctx, source.Path, "legacy", fingerprint, ref.SessionID, workspaceID); err != nil {
+					if err := a.recordDesktopSource(ctx, source.Path, "legacy", fingerprint, ref.SessionID, workspaceID); err != nil &&
+						!a.forkSourceOwnedElsewhere(ctx, err, source.Path, ref) {
 						return "", err
 					}
 				}
@@ -285,6 +286,24 @@ func (a *App) attachDesktopSession(ctx context.Context, scope, workspaceRoot str
 		}
 	}
 	return workspaceID, nil
+}
+
+// forkSourceOwnedElsewhere reports whether a rejected source registration is
+// a fork naming a source another session already owns; only forks may skip.
+func (a *App) forkSourceOwnedElsewhere(ctx context.Context, recordErr error, sourcePath string, ref session.SessionRef) bool {
+	if !errors.Is(recordErr, workspacestate.ErrMutationConflict) {
+		return false
+	}
+	info, err := a.desktopSessionService("").Query().Stat(ctx, ref)
+	if err != nil || info.Origin != session.SessionOriginFork {
+		return false
+	}
+	state, err := a.workspaceRegistry().Load(ctx)
+	if err != nil {
+		return false
+	}
+	owner, ok := state.SourceMappings[desktopSourceKey(sourcePath, "")]
+	return ok && owner.SessionID != ref.SessionID
 }
 
 func (a *App) validateDesktopWorkspaceMembership(ctx context.Context, workspaceID string, ref session.SessionRef) error {

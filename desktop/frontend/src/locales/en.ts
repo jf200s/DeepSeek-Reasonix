@@ -1088,6 +1088,7 @@ export const en = {
   "imageViewer.title": "Image preview",
   "composer.attachImageFailed": "Image paste failed",
   "composer.attachFileFailed": "File attach failed",
+  "composer.attachTooLarge": "{name} is too large to attach (limit {limit} MB)",
   "composer.attachDropFailed": "Dropped file attach failed",
   "composer.pasteImageFailed": "Could not read clipboard image",
   "composer.imageInputUnsupported": "The current model does not receive images directly. Configure an image-understanding model in Settings, switch to an image-capable model, or use an OCR/vision MCP tool to inspect the attachment path.",

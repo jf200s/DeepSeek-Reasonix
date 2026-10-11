@@ -758,10 +758,6 @@ func (a *Agent) steerQueueLen() int {
 	return len(a.steerQueue)
 }
 
-// CompactRatio returns the fraction of the window at which auto-compaction
-// fires (e.g. 0.8). The status line uses it to show headroom to the next compact.
-func (a *Agent) CompactRatio() float64 { return a.compactRatio }
-
 // CompactNow forces one projection compaction (canonical transcript untouched).
 func (a *Agent) CompactNow(ctx context.Context, instructions string) error {
 	_, err := a.contextManager().Prepare(ctx, ContextPreparePolicy{
@@ -833,6 +829,8 @@ type Options struct {
 	// RecentKeep fall back to defaults when unset.
 	ContextWindow int
 	CompactRatio  float64
+	// CompactRatioSource must be concurrency-safe; root/planner decisions stay live.
+	CompactRatioSource func() float64
 	// Deprecated compatibility inputs. New agents ignore these fields; automatic
 	// maintenance is controlled only by CompactRatio.
 	SoftCompactRatio       float64
@@ -1031,6 +1029,7 @@ func New(prov provider.Provider, tools *tool.Registry, session *Session, opts Op
 			maxSubagentDepth:   maxSubagentDepth,
 			contextWindow:      opts.ContextWindow,
 			compactRatio:       opts.CompactRatio,
+			compactRatioSource: opts.CompactRatioSource,
 			recentKeep:         opts.RecentKeep,
 			archiveDir:         opts.ArchiveDir,
 		},

@@ -20,6 +20,7 @@ const CODE_INDEX = {
   workspace_start_failed: 12,
   inbox_not_submitted: 16,
   image_attachment_unreadable: 17,
+  inbox_target_transient: 18,
 } as const;
 
 type InboxErrorCode = keyof typeof CODE_INDEX;
@@ -47,6 +48,7 @@ const ERROR_COPY: Record<Locale, readonly string[]> = {
     "Cancel failed: {error}",
     "The message was not sent. Refresh the session and try again",
     "The image could not be read. Re-add it or try again",
+    "The session is switching. The message will be sent automatically.",
   ],
   zh: [
     "收件箱已暂停",
@@ -67,6 +69,7 @@ const ERROR_COPY: Record<Locale, readonly string[]> = {
     "取消失败：{error}",
     "消息未发送，请刷新会话后重试",
     "图片读取失败，请重新添加或重试",
+    "会话正在切换，消息会自动发出。",
   ],
   "zh-TW": [
     "收件匣已暫停",
@@ -87,6 +90,7 @@ const ERROR_COPY: Record<Locale, readonly string[]> = {
     "取消失敗：{error}",
     "訊息未傳送，請重新整理會話後重試",
     "圖片讀取失敗，請重新加入或重試",
+    "工作階段正在切換，訊息會自動送出。",
   ],
 };
 

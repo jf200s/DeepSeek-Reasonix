@@ -31,7 +31,7 @@ func writeSessionIDHeader(w http.ResponseWriter, ctrl control.SessionAPI) {
 	}
 }
 
-var errExpectedSessionChanged = errors.New("active session changed; retry on the current session")
+var errExpectedSessionChanged = errors.New(SubmitSessionChangedMessage + "; retry on the current session")
 
 // expectedSessionErrorLocked fences a foreground mutation to the session the
 // caller displayed when it issued the request. The header is optional for

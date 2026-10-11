@@ -38194,3 +38194,25 @@ html[data-dock-launcher="full"] .app:not(.app--creation) .layout:not(.layout--wo
 .session-export-progress { position: fixed; right: 20px; bottom: 32px; z-index: var(--z-popover); max-width: min(480px, 90vw); padding: 12px 16px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface-2); color: var(--fg); box-shadow: 0 4px 18px #0002; }
 .session-export-progress > div { display: flex; align-items: center; gap: 12px; }
 .session-export-progress button { flex-shrink: 0; padding: 5px 9px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg-soft); color: var(--fg); cursor: pointer; }
+.goal-edit-form {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  font-size: 12px;
+  color: var(--fg-dim);
+}
+.goal-edit-form textarea {
+  resize: none;
+  max-height: 80px;
+  overflow-y: auto;
+}
+.goal-edit-form__error {
+  margin: 0;
+  color: var(--err);
+}
+.goal-edit-form__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

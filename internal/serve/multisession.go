@@ -275,7 +275,7 @@ func (s *Server) buildTaggedMode(ctx context.Context, ref string, inheritTemp, n
 }
 
 func (s *Server) detachedBusy(path string) bool {
-	path = agent.CanonicalSessionPath(path)
+	path = sessionRouteKey(path)
 	s.detachedMu.Lock()
 	defer s.detachedMu.Unlock()
 	_, ok := s.detached[path]
@@ -286,7 +286,7 @@ func (s *Server) detachedBusy(path string) bool {
 // request goroutine. Waiting for done is essential: without the acknowledgement
 // the watcher can close an idle controller just after it is re-attached.
 func (s *Server) takeDetached(path string) *detachedSession {
-	path = agent.CanonicalSessionPath(path)
+	path = sessionRouteKey(path)
 	s.detachedMu.Lock()
 	d := s.detached[path]
 	if d != nil && !d.retiring {
@@ -330,6 +330,14 @@ func (s *Server) registerDetached(ctrl control.SessionAPI, keeper *control.Sessi
 	}
 	s.detachedMu.Lock()
 	path := agent.CanonicalSessionPath(ctrl.SessionPath())
+	if path == "" {
+		// Identity (exclusive v3) sessions deliberately carry no legacy path;
+		// their detached key is the immutable session-id route. Transcript and
+		// runtime reads already resolve detached controllers by identity.
+		if ref, ok := sessionAPIRef(ctrl); ok && ref.SessionID != "" {
+			path = remoteSessionIDQueryPrefix + ref.SessionID
+		}
+	}
 	if path == "" {
 		s.detachedMu.Unlock()
 		return nil, fmt.Errorf("cannot detach a session without a path")
@@ -548,6 +556,7 @@ func (s *sessionTagSink) ActivateRuntime() {
 
 var errReplacedDuringBind = &replacedDuringBindError{}
 var errSessionTagUnavailable = errors.New("multi-session switching requires a session-tagged Serve controller")
+var errIdentityServiceUnavailable = errors.New("identity switching requires a session-service-capable Serve controller")
 
 type replacedDuringBindError struct{}
 
@@ -616,7 +625,11 @@ func (s *Server) reattachDetached(cur control.SessionAPI, detached *detachedSess
 	s.leases.Adopt(detached.keeper)
 	detached.keeper = nil
 	if detached.tag != nil {
-		detached.tag.SetPath(detached.ctrl.SessionPath())
+		if ref, ok := sessionAPIRef(detached.ctrl); ok && ref.SessionID != "" && detached.ctrl.SessionPath() == "" {
+			detached.tag.SetIdentity("", ref.SessionID)
+		} else {
+			detached.tag.SetPath(detached.ctrl.SessionPath())
+		}
 	}
 	if concrete, ok := detached.ctrl.(*control.Controller); ok {
 		concrete.SetOnSessionRecovered(s.sessionRecoveryHandler(concrete, s.leases))

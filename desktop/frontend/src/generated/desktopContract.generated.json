@@ -19969,7 +19969,7 @@
     },
     {
       "cancellation": "before-dispatch",
-      "domain": "desktop/remote_tab.go",
+      "domain": "desktop/remote_submit.go",
       "name": "SubmitRemoteTab",
       "owner": "App.SubmitRemoteTab",
       "params": [
@@ -19990,7 +19990,7 @@
         "resolver": "App.SubmitRemoteTab"
       },
       "sources": [
-        "desktop/remote_tab.go"
+        "desktop/remote_submit.go"
       ]
     },
     {
@@ -20103,7 +20103,7 @@
     },
     {
       "cancellation": "before-dispatch",
-      "domain": "desktop/remote_tab.go",
+      "domain": "desktop/remote_submit.go",
       "name": "SubmitRemoteTabWithSubmission",
       "owner": "App.SubmitRemoteTabWithSubmission",
       "params": [
@@ -20128,7 +20128,7 @@
         "resolver": "App.SubmitRemoteTabWithSubmission"
       },
       "sources": [
-        "desktop/remote_tab.go"
+        "desktop/remote_submit.go"
       ]
     },
     {
@@ -27324,6 +27324,13 @@
         },
         {
           "name": "roundsStarted",
+          "type": {
+            "kind": "integer"
+          }
+        },
+        {
+          "name": "workDurationMs",
+          "optional": true,
           "type": {
             "kind": "integer"
           }
@@ -38011,6 +38018,23 @@
           }
         },
         {
+          "name": "resultSequence",
+          "optional": true,
+          "type": {
+            "elem": {
+              "kind": "integer"
+            },
+            "kind": "nullable"
+          }
+        },
+        {
+          "name": "metadataReady",
+          "optional": true,
+          "type": {
+            "kind": "boolean"
+          }
+        },
+        {
           "name": "pinned",
           "optional": true,
           "type": {
@@ -40677,6 +40701,13 @@
               "kind": "string"
             },
             "kind": "array"
+          }
+        },
+        {
+          "name": "pendingSiblings",
+          "optional": true,
+          "type": {
+            "kind": "integer"
           }
         }
       ]

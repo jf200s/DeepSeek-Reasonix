@@ -272,7 +272,7 @@ func (a *App) replaceControllerForSessionOpenLocked(ctx context.Context, tab *Wo
 	tab.sink = snap.sink
 	tab.adoptDisplayState(&tabDisplayState{})
 	tab.ActivityStatus = ""
-	tab.replaceTelemetry(tabTelemetrySnapshot{}, sessionRuntimeKey(sessionRoute(ref.SessionID)))
+	tab.replaceTelemetry(loadTelemetryFor(sessionRoute(ref.SessionID)), sessionRuntimeKey(sessionRoute(ref.SessionID)))
 	setTabSessionIdentity(tab, sessionRoute(ref.SessionID))
 	tab.model = targetModel
 	tab.Label = candidate.Label()

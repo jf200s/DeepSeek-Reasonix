@@ -45,6 +45,24 @@ export async function confirmFollowup(binding: AppBindings, request: PendingFoll
   return receipt;
 }
 
+// A busy-window submit answers with the durable queue receipt: the desktop
+// queued the message instead of starting a turn. The receipt rides the bridge
+// error data so the composer can show the queue entry immediately.
+export type QueuedFollowupOutcome = { itemId: string; disposition: string; position: number; paused: boolean };
+
+export function queuedFollowupOutcome(error: unknown): QueuedFollowupOutcome | undefined {
+  const data = (error as { data?: { queuedFollowup?: unknown } } | undefined)?.data?.queuedFollowup;
+  if (!data || typeof data !== "object") return undefined;
+  const receipt = data as Partial<QueuedFollowupOutcome>;
+  if (typeof receipt.itemId !== "string" || receipt.itemId === "") return undefined;
+  return {
+    itemId: receipt.itemId,
+    disposition: typeof receipt.disposition === "string" && receipt.disposition ? receipt.disposition : "queued_followup",
+    position: typeof receipt.position === "number" ? receipt.position : 0,
+    paused: receipt.paused === true,
+  };
+}
+
 export function followupNotSubmitted(error: unknown): boolean {
   const outcome = submissionOutcome(error);
   if (outcome) return outcome === "not_accepted";
