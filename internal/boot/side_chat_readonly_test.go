@@ -15,6 +15,28 @@ import (
 	"reasonix/internal/tool"
 )
 
+// TestCompanionBootMustBeReadOnly pins the construction-time refusal: owner
+// facts without the read-only flag would boot an ordinary writable session,
+// which is exactly how a companion once wrote outside its workspace.
+func TestCompanionBootMustBeReadOnly(t *testing.T) {
+	_, err := BuildRuntime(context.Background(), Options{
+		Sink:           event.Discard,
+		SideChatParent: &SideChatParent{Title: "owner"},
+	})
+	if err == nil {
+		t.Fatal("a companion without the read-only flag must be refused at boot")
+	}
+	if !strings.Contains(err.Error(), "must be read-only") {
+		t.Fatalf("the refusal must name the cause; got %v", err)
+	}
+
+	// The guard must stay narrow: a tab that is not a companion may fail the
+	// build for its own reasons, but never for this one.
+	if _, err := BuildRuntime(context.Background(), Options{Sink: event.Discard}); err != nil && strings.Contains(err.Error(), "must be read-only") {
+		t.Fatalf("the read-only guard fired for a non-companion: %v", err)
+	}
+}
+
 // TestBuildReadOnlySessionStripsWriterTools pins the read-only session surface:
 // a side-chat session must reach the provider without writer tools, and its
 // shell must be the permission-classified read-only wrapper.

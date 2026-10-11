@@ -101,6 +101,12 @@ func nextRuntimeGeneration() uint64 { return runtimeGeneration.Add(1) }
 // otherwise-successful build fail: an assembly error degrades to a nil
 // Snapshot with a logged warning.
 func BuildRuntime(ctx context.Context, opts Options) (*BuildResult, error) {
+	// A companion is read-only by construction. Its tool set hides the writers,
+	// but a caller that sets the owner facts and forgets the flag would silently
+	// boot a writable session; refuse it where every build path passes.
+	if opts.SideChatParent != nil && !opts.ReadOnlySession {
+		return nil, fmt.Errorf("boot: a companion must be read-only, but ReadOnlySession is false")
+	}
 	return build(ctx, opts)
 }
 
