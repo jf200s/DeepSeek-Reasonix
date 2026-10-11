@@ -646,9 +646,7 @@ export function Composer({
   // Creation empty-session hero: slim centered composer under the welcome
   // headline (hides task/approval chrome; keeps model + effort).
   heroMode?: boolean;
-  // A surface hosting the composer for a read-only, ephemeral child session
-  // implements none of these controls: hostControls={false} drops the model
-  // switcher, approval mode and effort, and keeps the reporting context ring.
+  // Read-only, ephemeral child sessions implement none of these controls.
   hostControls?: boolean;
   context?: ContextInfo;
   turnCost?: number;
