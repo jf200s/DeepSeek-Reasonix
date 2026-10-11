@@ -31,11 +31,12 @@ func (a *App) sessionOpenBootOptions(
 	sharedHost *plugin.Host,
 	root, model string,
 ) boot.Options {
+	readOnly, sideChatParent := sideChatBootFields(tab)
 	return boot.Options{
 		Model:                    model,
 		RequireKey:               false,
-		ReadOnlySession:          tab.SideChat.Enabled,
-		SideChatParent:           sideChatParentForBoot(tab),
+		ReadOnlySession:          readOnly,
+		SideChatParent:           sideChatParent,
 		StatsSource:              "desktop",
 		TaskStore:                a.taskStore(),
 		OnConfigLoadWarnings:     a.configLoadWarningsHandler(),

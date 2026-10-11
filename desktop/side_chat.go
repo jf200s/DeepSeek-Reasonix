@@ -310,6 +310,16 @@ func (a *App) sideChatOwnerStandingContext(tabID string) string {
 // sideChatParentForBoot hands the stable owner facts to the companion's boot
 // options. The owner's goal and recent activity deliberately stay out of them:
 // they arrive per turn as standing context instead.
+// sideChatBootFields returns the two boot options only a companion needs: the
+// read-only boundary and the owner facts. Every boot path takes them from here,
+// so a companion cannot be built writable by one path and read-only by another.
+func sideChatBootFields(tab *WorkspaceTab) (readOnly bool, parent *boot.SideChatParent) {
+	if tab == nil {
+		return false, nil
+	}
+	return tab.SideChat.Enabled, sideChatParentForBoot(tab)
+}
+
 func sideChatParentForBoot(tab *WorkspaceTab) *boot.SideChatParent {
 	if tab == nil || !tab.SideChat.Enabled {
 		return nil

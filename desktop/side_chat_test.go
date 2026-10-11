@@ -50,3 +50,27 @@ func TestSideChatChildIDsListOnlyThatOwnersCompanions(t *testing.T) {
 		t.Fatalf("a tab without companions reported %v", got)
 	}
 }
+
+// TestCompanionBootFieldsStayPaired pins the pairing every boot path must read
+// from: a companion is read-only and carries its owner facts, an ordinary tab
+// has neither. A companion booted writable is the regression this guards.
+func TestCompanionBootFieldsStayPaired(t *testing.T) {
+	if readOnly, parent := sideChatBootFields(nil); readOnly || parent != nil {
+		t.Fatalf("a missing tab has neither; got readOnly=%v parent=%+v", readOnly, parent)
+	}
+	if readOnly, parent := sideChatBootFields(&WorkspaceTab{ID: "plain"}); readOnly || parent != nil {
+		t.Fatalf("an ordinary tab is writable and ownerless; got readOnly=%v parent=%+v", readOnly, parent)
+	}
+	companion := &WorkspaceTab{ID: "companion"}
+	companion.SideChat.Enabled = true
+	companion.SideChat.ParentTitle = "体素村庄"
+	companion.SideChat.ParentSessionID = "desktop-owner-1"
+
+	readOnly, parent := sideChatBootFields(companion)
+	if !readOnly {
+		t.Fatal("a companion must boot read-only: otherwise it asks to widen its write scope")
+	}
+	if parent == nil || parent.Title != "体素村庄" || parent.SessionID != "desktop-owner-1" {
+		t.Fatalf("a companion must carry its owner facts; got %+v", parent)
+	}
+}

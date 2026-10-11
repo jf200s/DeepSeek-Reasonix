@@ -1713,14 +1713,14 @@ func build(ctx context.Context, opts Options) (*BuildResult, error) {
 		Jobs:         jm,
 		// Parent write reservation at the executor entry covers all writers
 		// (including late Economy/MCP adds) without wrapping tool schemas.
-		WriteScheduler:               subagentScheduler,
-		WriteWorkspaceRoot:           root,
-		SessionTemp:                  sessionTemp,
-		WriteRoots:                   writeRootSet,
-		HomeDir:                      userHomeDir(),
-		StateRoot:                    config.MemoryUserDir(),
-		Ablation:                     opts.Ablation,
-		ReadOnlyExecution:            opts.ReadOnlySession,
+		WriteScheduler:     subagentScheduler,
+		WriteWorkspaceRoot: root,
+		SessionTemp:        sessionTemp,
+		WriteRoots:         writeRootSet,
+		HomeDir:            userHomeDir(),
+		StateRoot:          config.MemoryUserDir(),
+		Ablation:           opts.Ablation,
+		ReadOnlyExecution:  opts.ReadOnlySession, DisableWriteAccessExpand: opts.ReadOnlySession, // a read-only session must not widen its write scope
 		WorkspaceLease:               workspaceLease,
 		CapabilityLedger:             capLedger,
 		CapabilityAudit:              capAudit,

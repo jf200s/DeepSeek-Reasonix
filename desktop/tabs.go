@@ -3699,6 +3699,9 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	buildDisabledMCP := cloneServerViewMap(tab.disabledMCP)
 	buildGoal := tab.goal
 	buildSink := tab.sink
+	// A companion is built through this path, not through sessionOpenBootOptions,
+	// so its read-only boundary and owner facts must be captured here too.
+	buildReadOnly, buildSideChatParent := sideChatBootFields(tab)
 	a.saveTabsLocked()
 	a.mu.Unlock()
 	buildRuntime := (tabRuntimeSnapshot{
@@ -3723,6 +3726,8 @@ func (a *App) buildTabControllerWithContextCore(tab *WorkspaceTab, loadedSession
 	booted := a.bootTabControllerWithModelFallback(buildCtx, tab, cfg, sharedHost, boot.Options{
 		Model:                model,
 		RequireKey:           false,
+		ReadOnlySession:      buildReadOnly,
+		SideChatParent:       buildSideChatParent,
 		StatsSource:          "desktop",
 		TaskStore:            a.taskStore(),
 		OnConfigLoadWarnings: a.configLoadWarningsHandler(),
