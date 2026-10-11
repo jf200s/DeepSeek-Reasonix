@@ -12,17 +12,17 @@ import { createRoot } from "react-dom/client";
 import { installBridgeApp, installDom } from "./composerInboxHarness";
 
 installDom();
-// The composer asks the host for commands/models while it mounts. MetaForTab is
-// how the panel asks for the owner tab's title: the owner is a main-area tab and
-// never appears among the dock tabs, so the host is the only place to look. Any
-// other tab has no meta at all — the same answer the panel's own child lookup
-// gets, since nothing else in this test provides tab metadata.
+// The composer asks the host for commands/models while it mounts. ListTabs is how
+// the panel asks for the owner tab's title: the owner is a main-area tab and
+// never appears among the dock tabs, so the host is the only place to look. The
+// row carries the model label too — the panel must take the title, not that.
 installBridgeApp({
   Commands: async () => [],
   ModelsForTab: async () => [],
   SearchFileRefsForTab: async () => [],
-  MetaForTab: async (tabID: string) =>
-    tabID === "parent-1" ? { label: "OWNER_CONVERSATION" } : undefined,
+  ListTabs: async () => [
+    { id: "parent-1", topicTitle: "OWNER_CONVERSATION", label: "MODEL_LABEL" },
+  ],
 });
 
 const { SideChatPanel } = await import("../components/SideChatPanel");
@@ -60,9 +60,11 @@ assert.ok(container.querySelector('[data-side-chat-tab-id="child-1"]'), "the pan
 
 // A dock holding several companions has to say which conversation each one
 // belongs to, so the panel asks the host for the owner tab's title and shows it.
+// It must be the conversation's title, never the tab's model label.
 const owner = container.querySelector('[data-side-chat-parent-id="parent-1"]');
 assert.ok(owner, "the panel names the owner conversation");
 assert.match(owner?.textContent ?? "", /OWNER_CONVERSATION/, `owner label=${owner?.textContent}`);
+assert.doesNotMatch(owner?.textContent ?? "", /MODEL_LABEL/, "the model label never stands in for the conversation title");
 
 // The transcript comes from the child tab's own slot in the per-tab store. The
 // parent's text must never leak into the companion, and vice versa.

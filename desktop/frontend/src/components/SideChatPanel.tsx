@@ -53,15 +53,17 @@ export const SideChatPanel = memo(function SideChatPanel({
   // The owner's title, so a dock holding several companions says which
   // conversation each one belongs to. It is read through the host rather than
   // the dock store: an owner is a main-area tab and never appears among the
-  // dock tabs, so the dock store has nothing to look up.
+  // dock tabs, so the dock store has nothing to look up. The title lives on the
+  // tab list's `topicTitle` — the per-tab `Meta` carries only `label`, which is
+  // the model label ("deepseek-flash") and would name every conversation alike.
   const [parentLabel, setParentLabel] = useState("");
   useEffect(() => {
     let cancelled = false;
     void Promise.resolve()
-      .then(() => app.MetaForTab(parentTabId))
-      .then((meta) => {
+      .then(() => app.ListTabs())
+      .then((tabs) => {
         if (cancelled) return;
-        setParentLabel(meta?.label ?? "");
+        setParentLabel(tabs.find((tab) => tab.id === parentTabId)?.topicTitle ?? "");
       })
       .catch(() => {});
     return () => {

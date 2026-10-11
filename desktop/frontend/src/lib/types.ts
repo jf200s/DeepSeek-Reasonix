@@ -989,6 +989,9 @@ export interface ContextInfo {
 }
 
 export interface Meta extends RemoteSessionMetaFields {
+  /** The tab's model label (e.g. "deepseek-flash"), NOT the conversation title.
+   *  A human-readable conversation name lives on `TabMeta.topicTitle`; `Meta`
+   *  carries no title of its own, so read the tab list for one. */
   label: string;
   ready: boolean;
   runtime?: SessionRuntimeView;
