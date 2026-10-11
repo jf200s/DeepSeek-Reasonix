@@ -6,6 +6,7 @@ import type { Translator } from "../lib/i18n";
 import type { RightDockMode } from "../store/layout";
 import type { TabItem } from "../store/activityBar";
 import { useActivityBarStore } from "../store/activityBar";
+import { dockTabBelongsToSession } from "../lib/sideChatOwner";
 import { readWorkspaceTreeMemory, workspaceViewMemoryKey } from "../lib/workspaceViewMemory";
 import { useToast } from "../lib/toast";
 import { useDockViewRequests } from "./useDockViewRequests";
@@ -39,6 +40,11 @@ export type WorkspaceDockRegionProps = {
   mode: RightDockMode;
   showContext: boolean;
   t: Translator;
+  /** The conversation the main area currently shows. A companion belongs to the
+   *  conversation that opened it, so this decides which companions the dock may
+   *  show: switching the main tab to another session hides the ones that belong
+   *  elsewhere, and switching back brings them out again. */
+  parentSessionId: string;
   /** Opens (or activates) the dock view a tab-picker entry stands for. */
   onPickEntry: (entryId: string) => void;
   remote: ComponentProps<typeof RemotePanel>;
@@ -64,6 +70,12 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   const loadedRoot = useActivityBarStore(state => state.workspaceRoot);
   const activeTabId = useActivityBarStore(state => state.activeTabId);
   const tabs = useActivityBarStore(state => state.tabs);
+  // A companion is docked per conversation, not per tab: switching the main tab
+  // to another session keeps its id, so a tab-keyed dock would keep showing a
+  // companion that belongs to the conversation the user just left. Filter to the
+  // current session instead — the companion stays alive (and is not closed), it
+  // is just hidden until that session is the one on screen again.
+  const visibleTabs = tabs.filter((tab) => dockTabBelongsToSession(tab, props.parentSessionId));
   const { fileNavigation: fileNavigationProp } = props;
   // A standalone region keeps one instance for its whole life; the app shell
   // always passes the instance the runtime holds.
@@ -77,7 +89,7 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
   // of its own import graph.
   const openSideChat = (title: string) => {
     void import("../lib/sideChatOpen")
-      .then((module) => module.openSideChatTab(props.workspace.tabId ?? "", title))
+      .then((module) => module.openSideChatTab({ tabId: props.workspace.tabId ?? "", sessionId: props.parentSessionId }, title))
       .catch((error) => {
         // A read-only owner has no companion to offer. Say so: this menu entry is
         // the one opener that cannot check the owner itself, so the host's
@@ -146,7 +158,7 @@ export function WorkspaceDockRegion(props: WorkspaceDockRegionProps) {
         <aside className={["workbench-dock", `workbench-dock--${mode}`, overlay ? "workbench-dock--overlay" : ""].join(" ")} aria-label={t("rightDock.workbench")}>
           <div className="workbench-dock__panel">
             <Suspense fallback={null}>
-              <TabContainer key={loadedRoot} renderTab={renderTab} onPickEntry={props.onPickEntry} onPickSideChat={openSideChat} onClosePanel={props.workspace.onClose} />
+              <TabContainer key={loadedRoot} visibleTabs={visibleTabs} renderTab={renderTab} onPickEntry={props.onPickEntry} onPickSideChat={openSideChat} onClosePanel={props.workspace.onClose} />
             </Suspense>
           </div>
         </aside>

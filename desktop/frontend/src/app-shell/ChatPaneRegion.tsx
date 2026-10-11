@@ -184,10 +184,13 @@ export function ChatPaneRegion(props: ChatPaneRegionProps) {
                   // the companion) comes back as "false" — the companion never
                   // came up, and only the user can act on that, so it does not
                   // end at a console line.
-                  const parentTabId = transcript.tabId ?? "";
+                  // The owner is the conversation, not just the tab: a selection
+                  // made after the main tab switched sessions must reach that
+                  // session's companion, not the previous one still in the dock.
+                  const owner = { tabId: transcript.tabId ?? "", sessionId: transcript.state.meta?.sessionId ?? "" };
                   const refused = () => showToast(t("sideChat.unavailable"), "info", { durationMs: 6000 });
                   void import("../lib/sideChatOpen")
-                    .then((module) => module.askInSideChat(parentTabId, text, t("sideChat.title")))
+                    .then((module) => module.askInSideChat(owner, text, t("sideChat.title")))
                     .then((opened) => { if (!opened) refused(); })
                     .catch((error) => { console.warn("side chat: ask from selection failed", error); refused(); });
                 }}

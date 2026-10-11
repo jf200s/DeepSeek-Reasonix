@@ -2,9 +2,10 @@
 //
 // Contract for opening and closing a companion session from the dock. The + menu
 // entry is not a local panel: the host must open the read-only child session
-// first, and the dock tab is registered with the identity and ordinal the host
-// returned. Closing goes through the host teardown before the tab disappears, so
-// a failed teardown never makes the companion silently vanish.
+// first, and the dock tab is registered with the identity, ordinal and owning
+// conversation the host/opener supplied. Closing goes through the host teardown
+// before the tab disappears, so a failed teardown never makes the companion
+// silently vanish.
 
 import { JSDOM } from "jsdom";
 
@@ -54,7 +55,7 @@ function reset(): void {
 
 // --- opening asks the host for the companion, then registers its dock tab ---
 reset();
-await openSideChatTab("parent-1", "辅助对话");
+await openSideChatTab({ tabId: "parent-1", sessionId: "session-1" }, "辅助对话");
 const tabs = useActivityBarStore.getState().tabs;
 check("the host is asked for the parent tab", opened.length === 1 && opened[0] === "parent-1", `opened=${JSON.stringify(opened)}`);
 check("the companion opens as a side-chat dock tab", tabs.length === 1 && tabs[0]?.type === "sideChat", `tabs=${JSON.stringify(tabs)}`);
@@ -64,16 +65,21 @@ check(
   tabs[0]?.meta?.parentTabId === "parent-1" && tabs[0]?.meta?.childTabId === "child-7" && tabs[0]?.meta?.ordinal === 2,
   `meta=${JSON.stringify(tabs[0]?.meta)}`,
 );
+check(
+  "the tab records the conversation that owns it",
+  tabs[0]?.meta?.parentSessionId === "session-1",
+  `meta=${JSON.stringify(tabs[0]?.meta)}`,
+);
 
 // --- without a parent tab there is nothing to ask the host for ---
 reset();
 opened.length = 0;
-await openSideChatTab("", "辅助对话");
+await openSideChatTab({ tabId: "", sessionId: "session-1" }, "辅助对话");
 check("no parent tab means no host call and no dock tab", opened.length === 0 && useActivityBarStore.getState().tabs.length === 0);
 
 // --- closing tears the session down through the host, then drops the tab ---
 reset();
-await openSideChatTab("parent-1", "辅助对话");
+await openSideChatTab({ tabId: "parent-1", sessionId: "session-1" }, "辅助对话");
 const dockTab = useActivityBarStore.getState().tabs[0];
 await closeSideChatTab(dockTab.id);
 check("closing reaches the child session", closed.length === 1 && closed[0] === "child-7", `closed=${JSON.stringify(closed)}`);

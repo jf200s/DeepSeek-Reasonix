@@ -3,7 +3,8 @@
 // Contract for the side-chat dock tab. It is a first-class dock tab type, but a
 // companion session cannot outlive the app, so the tab is session-local: it
 // never enters the persisted dock snapshot and a stale one is dropped on
-// restore. Ordinary tabs keep round-tripping exactly as before.
+// restore. Ordinary tabs keep round-tripping exactly as before. It also carries
+// the conversation that owns it, which is what decides whether the dock shows it.
 
 import { JSDOM } from "jsdom";
 
@@ -19,6 +20,8 @@ const STORAGE_KEY = "reasonix.dock.tabs";
 // try to resolve it as a path.
 const staleModuleSpecifier = "../store/activityBar?stale-snapshot";
 const { useActivityBarStore } = await import("../store/activityBar");
+const { dockTabBelongsToSession } = await import("../lib/sideChatOwner");
+type TabItem = import("../store/activityBar").TabItem;
 
 let passed = 0;
 let failed = 0;
@@ -46,10 +49,11 @@ function snapshot(): Snapshot {
 
 // --- a side chat opens as a dock tab carrying its parent/child identity ---
 reset();
-useActivityBarStore.getState().addTab("sideChat", "辅助对话 1", { parentTabId: "parent-1", childTabId: "child-1", ordinal: 1 });
+useActivityBarStore.getState().addTab("sideChat", "辅助对话 1", { parentTabId: "parent-1", parentSessionId: "session-1", childTabId: "child-1", ordinal: 1 });
 const opened = useActivityBarStore.getState().tabs;
 check("side chat opens as a dock tab", opened.length === 1 && opened[0].type === "sideChat", `tabs=${JSON.stringify(opened)}`);
 check("side chat keeps its parent/child meta", opened[0]?.meta?.parentTabId === "parent-1" && opened[0]?.meta?.childTabId === "child-1");
+check("side chat records the owning conversation", opened[0]?.meta?.parentSessionId === "session-1", `meta=${JSON.stringify(opened[0]?.meta)}`);
 check("side chat becomes the active tab", useActivityBarStore.getState().activeTabId === opened[0]?.id);
 
 // --- it never enters the persisted snapshot ---
@@ -65,10 +69,18 @@ const withFiles = snapshot();
 check("an ordinary tab still persists", (withFiles.tabs ?? []).some((tab) => tab.type === "file"), `snapshot=${localStorage.getItem(STORAGE_KEY)}`);
 check("ordinary tabs do not carry the side chat along", (withFiles.tabs ?? []).every((tab) => tab.type !== "sideChat"));
 
+// --- the dock shows a companion only in the conversation that owns it ---
+const companion: TabItem = { id: "c1", type: "sideChat", label: "辅助对话 1", meta: { parentTabId: "parent-1", parentSessionId: "session-1", childTabId: "child-1" } };
+const fileTab: TabItem = { id: "f1", type: "file", label: "Files" };
+check("a companion is docked in its own conversation", dockTabBelongsToSession(companion, "session-1"));
+check("a companion is hidden once the tab shows another session", !dockTabBelongsToSession(companion, "session-2"), "a session switch keeps the tab id but changes the session");
+check("a companion comes back when its conversation is on screen again", dockTabBelongsToSession(companion, "session-1"));
+check("an ordinary tab is docked in every conversation", dockTabBelongsToSession(fileTab, "session-2"));
+
 // --- a stale snapshot that carries a side chat is dropped on restore ---
 localStorage.setItem(STORAGE_KEY, JSON.stringify({
   tabs: [
-    { id: "stale-side", type: "sideChat", label: "辅助对话 1", meta: { parentTabId: "p", childTabId: "c", ordinal: 1 } },
+    { id: "stale-side", type: "sideChat", label: "辅助对话 1", meta: { parentTabId: "p", parentSessionId: "s", childTabId: "c", ordinal: 1 } },
     { id: "files", type: "file", label: "Files" },
   ],
   activeTabId: "stale-side",

@@ -21,10 +21,15 @@ interface TabContainerProps {
   /** Opens a companion session for the current parent tab (host round-trip). */
   onPickSideChat?: (title: string) => void;
   onClosePanel?: () => void;
+  /** The tabs the dock may show. Defaults to the store's list; the dock passes a
+   *  list filtered to the conversation on screen, so a companion opened in
+   *  another session is hidden rather than closed and returns when that session
+   *  is reopened. */
+  visibleTabs?: TabItem[];
 }
 
-export function TabContainer({ renderTab, onPickEntry, onPickSideChat, onClosePanel }: TabContainerProps) {
-  const tabs = useActivityBarStore((s) => s.tabs);
+export function TabContainer({ renderTab, onPickEntry, onPickSideChat, onClosePanel, visibleTabs }: TabContainerProps) {
+  const storeTabs = useActivityBarStore((s) => s.tabs);
   const activeTabId = useActivityBarStore((s) => s.activeTabId);
   const addMenuOpen = useActivityBarStore((s) => s.addMenuOpen);
   const addTab = useActivityBarStore((s) => s.addTab);
@@ -33,7 +38,15 @@ export function TabContainer({ renderTab, onPickEntry, onPickSideChat, onClosePa
   const moveTab = useActivityBarStore((s) => s.moveTab);
   const setAddMenuOpen = useActivityBarStore((s) => s.setAddMenuOpen);
   const addButtonRef = useRef<HTMLButtonElement>(null);
-  const activeTab = tabs.find((tab) => tab.id === activeTabId) ?? null;
+  const tabs = visibleTabs ?? storeTabs;
+  // The active tab may be one the filter hides (a companion that belongs to
+  // another session). Prefer this session's own companion so returning to a
+  // conversation brings its companion back into view; otherwise fall back to the
+  // first visible tab, so the dock never lands on the empty picker.
+  const activeTab = tabs.find((tab) => tab.id === activeTabId)
+    ?? tabs.find((tab) => tab.type === "sideChat")
+    ?? tabs[0]
+    ?? null;
   // Closing the add menu on outside click / Escape lives inside TabAddMenu
   // (it knows its own bounds); the panel itself must not swallow those clicks.
 
