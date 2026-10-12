@@ -550,6 +550,9 @@ func (a *App) startup(ctx context.Context) {
 	a.startDesktopPersistenceReconciliation()
 	a.registerHistoryIndexEvents()
 	a.startSessionCatalog()
+	// A companion never survives a restart: any side-chat store whose writer is
+	// unheld is debris from a dead process, cleared once off the boot path.
+	a.goSafe("sweepOrphanSideChatSessions", a.sweepOrphanSideChatSessions)
 	a.goSafe("refreshBotRuntime", a.refreshBotRuntime)
 	a.goSafe("sendStartupPing", a.sendStartupPing)
 	a.goSafe("flushMetrics", a.flushMetrics)
