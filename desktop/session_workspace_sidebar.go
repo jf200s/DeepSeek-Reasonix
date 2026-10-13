@@ -539,6 +539,12 @@ func (a *App) canonicalTopicNodes(req ProjectTopicPageRequest, state workspacest
 		if !found || info.MetadataStatus == session.MetadataFailed {
 			continue
 		}
+		// A companion and a headless run stay resumable but are not conversations a
+		// sidebar offers. This is the canonical registry path; historical_catalog.go
+		// only guards the legacy source, so the two filters are not interchangeable.
+		if info.Kind == session.SessionKindSideChat || info.Kind == session.SessionKindHeadlessRun {
+			continue
+		}
 		row := workspaceSessionRow(workspaceID, id, info, found, false, service)
 		if found && cutoff > 0 && max(row.CreatedAt, row.UpdatedAt) < cutoff {
 			continue
