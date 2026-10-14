@@ -79,6 +79,9 @@ func BindWriteRootSet(tl tool.Tool, set *sandbox.WritableRootSet) tool.Tool {
 	case bash:
 		t.rootSet = set
 		return t
+	case imageGen:
+		t.rootSet = set
+		return t
 	default:
 		return tl
 	}

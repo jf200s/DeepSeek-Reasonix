@@ -34,8 +34,12 @@ type Workspace struct {
 	BashTimeout     time.Duration
 	Search          SearchSpec
 	ProxySpec       netclient.ProxySpec
-	ReadPaths       *PathResolver
-	SessionGuard    SessionDataGuard
+	// ImageGen is the resolved [imagegen] endpoint behind generate_image,
+	// already carrying the referenced provider entry's base_url and key. The
+	// zero value keeps the tool hidden from the model.
+	ImageGen     ImageGenSpec
+	ReadPaths    *PathResolver
+	SessionGuard SessionDataGuard
 	// WriteRootSet is the live writable-root manager. When set, file writers
 	// and bash read Baseline+Session+per-call roots from it instead of a
 	// static WriteRoots snapshot.
@@ -86,23 +90,24 @@ func (w Workspace) Tools(enabled ...string) []tool.Tool {
 		legacyShell, _ = AliasBash(shellTool, "bash")
 	}
 	overrides := map[string]tool.Tool{
-		"view_image":    viewImage{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"present":       present{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"read_file":     readFile{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
-		"write_file":    writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay, receipt: w.FileWriteReceipt},
-		"edit_file":     editFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
-		"multi_edit":    multiEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
-		"move_file":     moveFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
-		"notebook_edit": notebookEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
-		"delete_range":  deleteRange{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
-		"delete_symbol": deleteSymbol{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
-		"code_index":    codeIndex{workDir: w.Dir, forbidRoots: forbidRoots},
-		"bash":          legacyShell,
-		"pwsh":          shellTool,
-		"ls":            listDir{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"glob":          globTool{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
-		"grep":          grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
-		"web_fetch":     webFetch{proxySpec: w.ProxySpec},
+		"view_image":     viewImage{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
+		"present":        present{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
+		"read_file":      readFile{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots, overlay: w.FileOverlay},
+		"write_file":     writeFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay, receipt: w.FileWriteReceipt},
+		"edit_file":      editFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"multi_edit":     multiEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"move_file":      moveFile{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig},
+		"notebook_edit":  notebookEdit{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"delete_range":   deleteRange{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"delete_symbol":  deleteSymbol{workDir: w.Dir, roots: roots, guard: w.SessionGuard, managed: w.ManagedConfig, overlay: w.FileOverlay},
+		"code_index":     codeIndex{workDir: w.Dir, forbidRoots: forbidRoots},
+		"bash":           legacyShell,
+		"pwsh":           shellTool,
+		"ls":             listDir{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
+		"glob":           globTool{workDir: w.Dir, paths: w.ReadPaths, forbidRoots: forbidRoots},
+		"grep":           grepTool{workDir: w.Dir, paths: w.ReadPaths, rg: w.Search.RgPath, forbidRoots: forbidRoots, sb: w.Bash, sessionTemp: w.SessionTemp, overlay: w.FileOverlay},
+		"web_fetch":      webFetch{proxySpec: w.ProxySpec},
+		"generate_image": imageGen{workDir: w.Dir, roots: roots, rootSet: w.WriteRootSet, guard: w.SessionGuard, spec: w.ImageGen},
 	}
 	all := tool.Builtins()
 	if len(enabled) == 0 {

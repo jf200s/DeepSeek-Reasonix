@@ -9,7 +9,7 @@ func runtimeConfigCoreClassification() []configTypeClassification {
 	return []configTypeClassification{
 		classifyConfigType[config.Config](configFieldClasses{
 			runtime: "DefaultModel Language CredentialsStore Desktop Billing Agent Providers Tools Checkpoints " +
-				"Permissions Sandbox Network Environment Plugins Skills LSP Browser Bot Secrets Remote",
+				"Permissions Sandbox Network Environment Plugins Skills LSP Browser Bot Secrets Remote ImageGen",
 			excluded: "ConfigVersion UI CLI Telemetry Notifications Statusline Serve",
 		}),
 		classifyConfigType[config.AgentConfig](configFieldClasses{
@@ -43,6 +43,9 @@ func runtimeConfigCoreClassification() []configTypeClassification {
 		classifyConfigType[config.BackgroundJobsConfig](configFieldClasses{runtime: "StalledWarningSeconds"}),
 		classifyConfigType[config.SearchConfig](configFieldClasses{runtime: "Engine RgPath"}),
 		classifyConfigType[config.ShellConfig](configFieldClasses{runtime: "Prefer Path"}),
+		// Image generation changes the provider-visible tool surface and its
+		// endpoint, so it belongs to the runtime snapshot alongside [tools].
+		classifyConfigType[config.ImageGenConfig](configFieldClasses{runtime: "Provider Model Size OutputDir"}),
 		classifyConfigType[config.CheckpointsConfig](configFieldClasses{runtime: "RetainTurns BlobQuotaBytes"}),
 		classifyConfigType[config.PermissionsConfig](configFieldClasses{runtime: "Mode Allow Ask Deny AllowDynamicBash"}),
 		classifyConfigType[config.SandboxConfig](configFieldClasses{runtime: "WorkspaceRoot AllowWrite ForbidRead Bash Network"}),

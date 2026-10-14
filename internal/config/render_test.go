@@ -248,6 +248,12 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 	orig.Environment.Enabled = boolPtr(false)
 	orig.Environment.Tools = map[string]string{"go": "/opt/homebrew/bin/go", "python3": "~/.pyenv/shims/python3"}
 	orig.Skills.Paths = []string{"~/my-skills", "../shared/skills"}
+	orig.ImageGen = ImageGenConfig{
+		Provider:  "siliconflow",
+		Model:     "Tongyi-MAI/Z-Image-Turbo",
+		Size:      "1024x1024",
+		OutputDir: ".reasonix/generated",
+	}
 	orig.Skills.ExcludedPaths = []string{"~/.agents/skills"}
 	orig.Skills.DisabledSkills = []string{"review", "explore"}
 	orig.Skills.DisableImplicitInvocation = true
@@ -326,6 +332,10 @@ func TestRenderTOMLRoundTrips(t *testing.T) {
 
 	if got.DefaultModel != "mimo-pro" {
 		t.Errorf("default_model = %q, want mimo-pro", got.DefaultModel)
+	}
+	if got.ImageGen.Provider != "siliconflow" || got.ImageGen.Model != "Tongyi-MAI/Z-Image-Turbo" ||
+		got.ImageGen.Size != "1024x1024" || got.ImageGen.OutputDir != ".reasonix/generated" {
+		t.Errorf("imagegen round-trip = %+v", got.ImageGen)
 	}
 	if got.ConfigVersion != Default().ConfigVersion {
 		t.Errorf("config_version = %d, want %d", got.ConfigVersion, Default().ConfigVersion)

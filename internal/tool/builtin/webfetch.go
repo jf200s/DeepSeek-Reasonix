@@ -249,7 +249,14 @@ func blockedFetchIP(ip net.IP) bool {
 }
 
 func (wf webFetch) proxyURLFor(req *http.Request) (string, error) {
-	pf, err := netclient.ProxyFunc(wf.proxySpec)
+	return proxyURLForRequest(wf.proxySpec, req)
+}
+
+// proxyURLForRequest resolves the proxy URL for one request from a ProxySpec.
+// It is shared by the network-facing built-ins (web_fetch, generate_image) so
+// both honor the same session proxy.
+func proxyURLForRequest(spec netclient.ProxySpec, req *http.Request) (string, error) {
+	pf, err := netclient.ProxyFunc(spec)
 	if err != nil {
 		return "", err
 	}

@@ -421,6 +421,7 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 
 	renderLSPConfig(&b, c.LSP)
 	renderBrowserConfig(&b, c.Browser)
+	renderImageGenConfig(&b, c.ImageGen)
 
 	b.WriteString("[skills]\n")
 	if len(c.Skills.Paths) > 0 {

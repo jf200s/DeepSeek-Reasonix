@@ -70,6 +70,7 @@ type Config struct {
 	Serve            ServeConfig         `toml:"serve"`
 	Secrets          SecretsConfig       `toml:"secrets"`
 	Remote           RemoteConfig        `toml:"remote"`
+	ImageGen         ImageGenConfig      `toml:"imagegen"`
 
 	systemPromptFileSource     promptFileSource
 	providerSources            map[string]providerSourceScope

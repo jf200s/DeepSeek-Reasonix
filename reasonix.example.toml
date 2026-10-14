@@ -141,6 +141,17 @@ mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool 
 [tools.background_jobs]
 stalled_warning_seconds = 900   # heads-up once per background job after this many quiet seconds; a quiet job is not necessarily stuck; 0 disables
 
+# Image generation. generate_image reuses one [[providers]] entry for its
+# base_url, API key, and network proxy, so no second credential is stored.
+# Works with any endpoint that accepts POST {base_url}/images/generations and
+# returns data[]/images[] — e.g. SiliconFlow (https://api.siliconflow.cn/v1 with
+# Tongyi-MAI/Z-Image-Turbo, or https://api.siliconflow.com/v1 for FLUX.1).
+# [imagegen]
+# provider   = "siliconflow"   # name of a configured [[providers]] entry; empty = generate_image is unavailable
+# model      = "Tongyi-MAI/Z-Image-Turbo"   # default model; empty = the entry's default model
+# size       = "1024x1024"   # default image size; empty = let the endpoint choose
+# output_dir = ".reasonix/generated"   # workspace-relative directory for generated images
+
 # Sandbox confinement bounds the blast radius of tool calls. Writers may only
 # modify workspace_root (empty = current directory) plus allow_write. forbid_read
 # hides sensitive directories from read/list/search tools and from sandboxed bash

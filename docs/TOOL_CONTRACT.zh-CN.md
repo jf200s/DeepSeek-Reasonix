@@ -21,6 +21,7 @@ schema 不再暴露这些旧名。
 | `delete_range` | false | 用精确 start/end 文本锚点删除文件中的连续范围。 |
 | `delete_symbol` | false | 用 Go AST 删除 Go 源文件中的命名符号。 |
 | `edit_file` | false | 将文件中的唯一精确字符串替换为另一个字符串。 |
+| `generate_image` | false | 按提示词调用 [imagegen] 配置的生图端点生成图片，并保存为工作区内的文件。返回保存路径，同时把图片附加到结果中供支持视觉的模型查看。文本生图请求用这个工具，不要自己"画"。 |
 | `glob` | true | 查找匹配 glob pattern 的文件。无依赖的 glob 应同轮下发。 |
 | `get_goal` | true | 读取当前目标及其进程内 activation 和停跑原因；会话没有目标时返回 `goal: null`。 |
 | `grep` | true | 在文件或目录下按正则搜索文本。无依赖的搜索应同轮下发。 |
