@@ -37,6 +37,8 @@ func RunSubAgentWithSession(ctx context.Context, prov provider.Provider, reg *to
 	if sess == nil {
 		return "", fmt.Errorf("sub-agent session is nil")
 	}
+	// A child spawned from inside a program still runs as its own agent loop.
+	ctx = tool.WithoutNested(ctx)
 	if err := BindChildComposition(ctx, sess, true); err != nil {
 		return "", err
 	}

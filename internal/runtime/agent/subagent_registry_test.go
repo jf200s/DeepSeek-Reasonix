@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"reasonix/internal/runtime/usecap"
+	"slices"
 	"strings"
 	"testing"
 
@@ -98,22 +99,138 @@ func (v visTool) Schema() json.RawMessage                                  { ret
 func (v visTool) Execute(context.Context, json.RawMessage) (string, error) { return "", nil }
 func (v visTool) ReadOnly() bool                                           { return true }
 
-// An exclusive program surface is a decision about what may reach the model,
-// so a sub-agent registry built from the parent inherits it instead of showing
-// and calling every tool the parent hid.
-func TestFilterRegistryInheritsAnExclusiveSurface(t *testing.T) {
+// childSchemaNames is the child's provider-visible surface, sorted.
+func childSchemaNames(reg *tool.Registry) []string {
+	out := make([]string, 0)
+	for _, schema := range reg.Schemas() {
+		out = append(out, schema.Name)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// The boot-time unified surface is advisory: it shapes what the main model is
+// offered and says nothing about what a delegated child inherits. A child runs
+// its own loop with its own allowlist, so a profile tool the parent's default
+// surface hides — and the protocol tools attached after construction — reach
+// the child's provider.
+func TestFilterRegistryLeavesAnAdvisorySurfaceToTheChild(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(visTool{"read_file"})
+	parent.Add(visTool{"specialist_tool"})
+	parent.SetProviderVisibleTools([]string{"read_file"})
+
+	child := SubagentToolRegistry(parent, nil)
+	child.Add(visTool{"view_image"}) // what childTools contributes for an image model
+	AttachReviewReportTool(child, ReviewReportGrant{})
+
+	want := []string{"complete_subtask", "read_file", "review_report", "specialist_tool", "view_image"}
+	if got := childSchemaNames(child); !slices.Equal(got, want) {
+		t.Fatalf("advisory child schema = %v, want %v", got, want)
+	}
+}
+
+// A composition binding is authoritative: a tool it hides stays hidden from
+// delegated children, while the protocol and model-capability tools a child
+// owes are always added back even though the binding never named them.
+func TestFilterRegistryIntersectsAnAuthoritativeSurface(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(visTool{"read_file"})
+	parent.Add(visTool{"hidden_writer"})
+	parent.SetProviderVisibleToolsAuthoritative([]string{"read_file"})
+
+	child := SubagentToolRegistry(parent, nil)
+	child.Add(visTool{"view_image"})
+	AttachReviewReportTool(child, ReviewReportGrant{})
+
+	want := []string{"complete_subtask", "read_file", "review_report", "view_image"}
+	if got := childSchemaNames(child); !slices.Equal(got, want) {
+		t.Fatalf("authoritative child schema = %v, want %v", got, want)
+	}
+	if child.ProviderVisible("hidden_writer") {
+		t.Fatal("a binding-hidden tool was offered to the child")
+	}
+	// A profile allowlist cannot expand the binding either.
+	narrowed := SubagentToolRegistry(parent, []string{"hidden_writer"})
+	if narrowed.ProviderVisible("hidden_writer") {
+		t.Fatal("a child allowlist widened an authoritative binding")
+	}
+
+	// The binding keeps travelling down: a grandchild intersects with the
+	// child's surface, so the hidden tool never reappears.
+	grandchild := SubagentToolRegistry(child, nil)
+	if grandchild.ProviderVisible("hidden_writer") {
+		t.Fatal("an authoritative binding stopped at the first delegation layer")
+	}
+}
+
+// An exclusive program surface is a decision about the main model only. A
+// child is not in PTC mode, so the pin is not mirrored onto it; the child's own
+// toolset decides, and the schema is never left empty.
+func TestFilterRegistryDoesNotInheritAnExclusiveSurface(t *testing.T) {
 	parent := tool.NewRegistry()
 	parent.Add(visTool{"run_code"})
-	parent.Add(visTool{"bash"})
+	parent.Add(visTool{"read_file"})
+	parent.Add(visTool{"grep"})
 	parent.SetProviderVisibleToolsExclusive([]string{"run_code"})
 
-	child := FilterRegistry(parent, nil)
-	schemas := child.Schemas()
-	if len(schemas) != 1 || schemas[0].Name != "run_code" {
-		t.Fatalf("child schemas = %v, want only run_code", schemas)
+	child := SubagentToolRegistry(parent, nil)
+	got := childSchemaNames(child)
+	if len(got) == 0 {
+		t.Fatal("the child inherited an exclusive surface and was left with an empty schema")
 	}
-	child.ShowToProvider(true, "bash")
-	if schemas := child.Schemas(); len(schemas) != 1 {
-		t.Fatalf("the child's exclusive surface was widened: %v", schemas)
+	if slices.Contains(got, "run_code") {
+		t.Fatalf("run_code reached a subagent schema: %v", got)
+	}
+	for _, want := range []string{"complete_subtask", "grep", "read_file"} {
+		if !slices.Contains(got, want) {
+			t.Fatalf("exclusive-parent child schema %v lost %q", got, want)
+		}
+	}
+	// The pin still holds where it was declared: the main model.
+	if parent.Schemas()[0].Name != "run_code" || len(parent.Schemas()) != 1 {
+		t.Fatalf("the parent's exclusive surface changed: %v", parent.Schemas())
+	}
+}
+
+// Program tools call other tools by name through the parent's engine. A child
+// that inherited them could run a program whose allowlist check happened in the
+// parent's boundary, so no child registry carries them at all.
+func TestSubagentRegistriesNeverCarryProgramTools(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(visTool{"run_code"})
+	parent.Add(visTool{"run_script"})
+	parent.Add(visTool{"read_file"})
+
+	for _, names := range [][]string{nil, {"run_code", "run_script", "read_file"}} {
+		for label, child := range map[string]*tool.Registry{
+			"writer":    SubagentToolRegistry(parent, names),
+			"read-only": ReadOnlySubagentToolRegistry(parent, names),
+		} {
+			for _, hidden := range []string{"run_code", "run_script"} {
+				if _, ok := child.Get(hidden); ok {
+					t.Errorf("%s child with allowlist %v holds %s", label, names, hidden)
+				}
+			}
+			if _, ok := child.Get("read_file"); !ok {
+				t.Errorf("%s child with allowlist %v lost read_file", label, names)
+			}
+		}
+	}
+}
+
+// Strict read-only children keep their own read-only construction and never
+// mirror the parent's exclusive pin, which constrains only the main model.
+func TestReadOnlySubagentRegistryDoesNotInheritTheExclusivePin(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(visTool{"read_file"})
+	parent.Add(visTool{"grep"})
+	parent.Add(visTool{"run_code"})
+	parent.SetProviderVisibleToolsExclusive([]string{"run_code"})
+
+	child := ReadOnlySubagentToolRegistry(parent, nil)
+	want := []string{"grep", "read_file"}
+	if got := childSchemaNames(child); !slices.Equal(got, want) {
+		t.Fatalf("read-only child schema = %v, want %v", got, want)
 	}
 }

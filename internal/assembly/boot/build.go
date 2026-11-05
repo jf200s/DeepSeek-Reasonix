@@ -513,7 +513,9 @@ func (b *builder) controller() (*control.Controller, error) {
 	}
 	if binding := b.opts.Composition; binding != nil {
 		if binding.Digest != "" {
-			t.reg.SetProviderVisibleTools(binding.ToolSurface)
+			// A restored binding is the host's decision for the whole delegated
+			// tree, so children intersect their tools with it.
+			t.reg.SetProviderVisibleToolsAuthoritative(binding.ToolSurface)
 		} else if !binding.Live() && binding.Version.Definition.Tools.Mode == "select" {
 			t.reg.SetProviderVisibleTools(nil)
 		}

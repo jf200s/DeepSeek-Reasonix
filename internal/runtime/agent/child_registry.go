@@ -36,6 +36,10 @@ var subagentAlwaysHiddenTools = []string{
 	"install_source",
 	"apply_isolated",
 	"discard_isolated",
+	// Program tools call tools by name through the parent's engine; a child does
+	// not inherit that run, so an allowlist naming them cannot widen it.
+	"run_code",
+	"run_script",
 }
 
 var subagentJobTools = []string{
@@ -148,9 +152,9 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 		}
 		sub.Add(tl)
 	}
-	// The parent's visibility is a decision about what may reach the model, so
-	// the child inherits it: an exclusive program surface stays exclusive.
-	sub.CopyProviderVisibilityFrom(parent)
+	// Only an authoritative binding is inherited. Advisory is the main model's
+	// default surface and exclusive is its pin; neither reaches the child.
+	sub.InheritProviderVisibility(parent, completeSubtaskToolName, "review_report", "view_image")
 	return sub
 }
 
@@ -363,6 +367,8 @@ func ReadOnlySubagentToolRegistryForDepth(parent *tool.Registry, names []string,
 // ReadOnlySubagentToolRegistryForDepthWithRuntime is the read-only registry
 // builder with an optional session MCP runtime for proxy injection.
 func ReadOnlySubagentToolRegistryForDepthWithRuntime(parent *tool.Registry, names []string, childDepth, maxDepth int, runtime *usecap.MCPCapabilityRuntime) *tool.Registry {
+	// The strict read-only contract is this surface's only source: a parent's
+	// authoritative binding or exclusive pin is not inherited here.
 	exclude := append([]string(nil), subagentAlwaysHiddenTools...)
 	if childDepth >= NormalizeMaxSubagentDepth(maxDepth) {
 		exclude = append(exclude, subagentRecursiveTools...)

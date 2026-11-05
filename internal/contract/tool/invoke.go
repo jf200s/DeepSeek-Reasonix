@@ -47,6 +47,17 @@ func IsNested(ctx context.Context) bool {
 	return nested
 }
 
+// WithoutNested clears the nested marker on a derived context. A sub-agent
+// spawned from inside a program runs its own agent loop: its model-issued calls
+// are not program-nested, so the degradation nested tools opt into must stop at
+// the child's entry.
+func WithoutNested(ctx context.Context) context.Context {
+	if !IsNested(ctx) {
+		return ctx
+	}
+	return context.WithValue(ctx, nestedKey{}, false)
+}
+
 // NestedCallID is the id a nested call runs under: its caller's id, a dot, and
 // its 1-based sequence within that caller. A recorded nested call carries no
 // other mark of its caller, so readers of a recording recognise it by this id.
