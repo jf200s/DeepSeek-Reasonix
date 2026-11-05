@@ -244,12 +244,10 @@ const (
 
 // IdleTimeout is how long this host's kernel may sit with no client connected
 // before it exits on its own. The entry's own value wins over the [remote]
-// default. With neither set, the host kind decides: a WSL distribution is kept
-// for reconnects and leaves after DefaultRemoteIdleTimeoutMinutes, while an SSH
-// kernel keeps its long-standing stay-resident behaviour and is never exited
-// for idleness. Zero exits as soon as the kernel is idle; -1
-// (RemoteIdleTimeoutNever) means never, and is reported as a negative duration
-// so a caller can pass it through unchanged.
+// default; with neither set a WSL distribution takes
+// DefaultRemoteIdleTimeoutMinutes and an SSH kernel never exits for idleness.
+// -1 means never (a negative duration), zero is refused by validation, and an
+// entry built in memory still maps zero to "exit once no client is connected".
 func (e RemoteHostEntry) IdleTimeout(global *int) time.Duration {
 	minutes := RemoteIdleTimeoutNever
 	if e.HostKind() == RemoteKindWSL {
@@ -268,10 +266,12 @@ func (e RemoteHostEntry) IdleTimeout(global *int) time.Duration {
 }
 
 // validateRemoteIdleTimeoutMinutes is the one rule for an idle timeout, applied
-// to the user-global [remote] value and to each host's override.
+// to the user-global [remote] value and to each host's override. -1 is the only
+// spelling of "never"; anything else is a real window of at least one minute,
+// and zero is refused rather than read as "exit at once".
 func validateRemoteIdleTimeoutMinutes(minutes int) error {
-	if minutes < RemoteIdleTimeoutNever || minutes > MaxRemoteIdleTimeoutMinutes {
-		return fmt.Errorf("idle_timeout_minutes %d out of range -1..%d", minutes, MaxRemoteIdleTimeoutMinutes)
+	if minutes != RemoteIdleTimeoutNever && (minutes < 1 || minutes > MaxRemoteIdleTimeoutMinutes) {
+		return fmt.Errorf("idle_timeout_minutes %d must be -1 (never) or 1..%d", minutes, MaxRemoteIdleTimeoutMinutes)
 	}
 	return nil
 }
@@ -300,6 +300,15 @@ func validateRemoteHostIdleTimeouts(hosts []RemoteHostEntry) error {
 		}
 	}
 	return nil
+}
+
+// validateRemoteIdleTimeouts holds the global default and every host override
+// to the same rule, naming whichever setting is out of range.
+func validateRemoteIdleTimeouts(global *int, hosts []RemoteHostEntry) error {
+	if err := validateRemoteIdleTimeout("", global); err != nil {
+		return err
+	}
+	return validateRemoteHostIdleTimeouts(hosts)
 }
 
 func validateRemoteHost(e RemoteHostEntry) error {

@@ -45,6 +45,9 @@ type relaunchOnReconnect interface {
 // Forwards is the part of a forward registry the pool drives.
 type Forwards interface {
 	Add(spec forward.Spec) (string, error)
+	// Replace repoints an existing registration, which is how a relaunched
+	// kernel takes over the forward its predecessor held.
+	Replace(spec forward.Spec) (string, error)
 	List() []forward.Entry
 	Remove(name string) error
 }

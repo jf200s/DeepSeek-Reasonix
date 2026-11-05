@@ -1,6 +1,7 @@
 package serve
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -125,5 +126,133 @@ func TestAWindowsWorkspaceReadUsesAPaneOpenedOnItsMntForm(t *testing.T) {
 	}
 	if got := attaches.Load(); got != 0 {
 		t.Fatalf("the read dialled %d time(s), want the open pane's link", got)
+	}
+}
+
+// ensuringAttacher repairs its kernel on demand and counts how often the proxy
+// asked. It is the link layer that can bring a dead kernel back, unlike the
+// resolver-only attachers the other tests use.
+type ensuringAttacher struct {
+	stubAttacher
+
+	mu      sync.Mutex
+	addrs   []string
+	ensures atomic.Int32
+}
+
+func (a *ensuringAttacher) EnsureEndpoint(_ context.Context, host, workspace string) (RemoteEndpoint, bool) {
+	n := a.ensures.Add(1)
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	if len(a.addrs) == 0 {
+		return RemoteEndpoint{}, false
+	}
+	addr := a.addrs[0]
+	if int(n) < len(a.addrs) {
+		addr = a.addrs[n-1]
+	}
+	return RemoteEndpoint{Host: host, Workspace: workspace, Addr: addr, Token: "remote-secret"}, true
+}
+
+// The request path asks the link layer before proxying, and one request uses
+// exactly one answer: a kernel relaunched between the probe and the send was
+// not consulted twice, and the address the proxy used is the address the error
+// handler names.
+func TestARemoteRequestProxiesTheEndpointEnsureJustReturned(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = io.WriteString(w, "the kernel ensure returned: "+r.URL.Path)
+	}))
+	defer live.Close()
+
+	att := &ensuringAttacher{}
+	att.attach = func(host, workspace string) (RemoteEndpoint, func(), error) {
+		return RemoteEndpoint{Host: host, Workspace: workspace, Addr: "127.0.0.1:1", Token: "remote-secret"}, func() {}, nil
+	}
+	att.addrs = []string{live.Listener.Addr().String()}
+
+	h := NewHub(HubOptions{Remote: att})
+	rt := remotePane(t, h, "127.0.0.1:1")
+	front := httptest.NewServer(operatorHandler(h))
+	defer front.Close()
+
+	resp, err := http.Get(front.URL + rt.view().Base + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	body, _ := io.ReadAll(resp.Body)
+	if got := string(body); got != "the kernel ensure returned: /status" {
+		t.Fatalf("pane answered %q, want the endpoint EnsureEndpoint returned", got)
+	}
+	if got := att.ensures.Load(); got != 1 {
+		t.Fatalf("EnsureEndpoint ran %d time(s) for one request, want 1", got)
+	}
+}
+
+// A request that fails after it was sent is reported once and never replayed:
+// a POST that reached the kernel must not be sent again by the proxy. The next
+// request is free to ask for a fresh endpoint and recover.
+func TestARemotePostThatFailsAfterSendingIsNotReplayed(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	var hits atomic.Int32
+	kernel := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hits.Add(1) == 1 {
+			// Take the request, then drop the connection without an answer, the
+			// shape of a kernel that dies after accepting a POST.
+			hijacker, ok := w.(http.Hijacker)
+			if !ok {
+				t.Error("test kernel cannot hijack its connection")
+				return
+			}
+			conn, _, err := hijacker.Hijack()
+			if err == nil {
+				_ = conn.Close()
+			}
+			return
+		}
+		_, _ = io.WriteString(w, "recovered: "+r.URL.Path)
+	}))
+	defer kernel.Close()
+
+	att := &ensuringAttacher{}
+	att.attach = func(host, workspace string) (RemoteEndpoint, func(), error) {
+		return RemoteEndpoint{Host: host, Workspace: workspace, Addr: kernel.Listener.Addr().String(), Token: "remote-secret"}, func() {}, nil
+	}
+	att.addrs = []string{kernel.Listener.Addr().String()}
+
+	h := NewHub(HubOptions{Remote: att})
+	rt := remotePane(t, h, kernel.Listener.Addr().String())
+	front := httptest.NewServer(operatorHandler(h))
+	defer front.Close()
+
+	resp, err := http.Post(front.URL+rt.view().Base+"/turns", "application/json", strings.NewReader(`{"prompt":"hello"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("failed POST = %d, want 502", resp.StatusCode)
+	}
+	var reason Reason
+	if err := json.NewDecoder(resp.Body).Decode(&reason); err != nil {
+		t.Fatalf("decode refusal: %v", err)
+	}
+	if reason.Code != "remote.unreachable" || reason.Params["host"] != "gpu-box" {
+		t.Fatalf("refusal = %+v, want remote.unreachable naming the host", reason)
+	}
+	if got := hits.Load(); got != 1 {
+		t.Fatalf("the kernel received the POST %d time(s), want 1", got)
+	}
+
+	// The next request resolves the endpoint again and reaches the kernel.
+	answer, err := http.Get(front.URL + rt.view().Base + "/status")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer answer.Body.Close()
+	body, _ := io.ReadAll(answer.Body)
+	if got := string(body); got != "recovered: /status" {
+		t.Fatalf("next request answered %q, want the kernel again", got)
 	}
 }

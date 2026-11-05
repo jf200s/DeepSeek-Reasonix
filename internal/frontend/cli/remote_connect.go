@@ -83,12 +83,13 @@ func terminalHostKeyPrompt(_ context.Context, q remote.HostKeyQuestion) (bool, e
 
 // remoteConnectSyntax is the parsed form of `reasonix remote connect|open …`.
 type remoteConnectSyntax struct {
-	name        string
-	workspace   string
-	localPort   int
-	noServe     bool
-	open        bool
-	forwardOnly bool
+	name         string
+	workspace    string
+	localPort    int
+	localPortSet bool
+	noServe      bool
+	open         bool
+	forwardOnly  bool
 }
 
 const remoteConnectUsage = "usage: reasonix remote connect <name> [flags]"
@@ -129,12 +130,13 @@ func parseRemoteConnectSyntax(args []string, openAlias bool) (remoteConnectSynta
 		return remoteConnectSyntax{}, errors.New(remoteConnectUsage)
 	}
 	return remoteConnectSyntax{
-		name:        name,
-		workspace:   *workspace,
-		localPort:   *localPort,
-		noServe:     *noServe,
-		open:        *open,
-		forwardOnly: *forwardOnly,
+		name:         name,
+		workspace:    *workspace,
+		localPort:    *localPort,
+		localPortSet: flagWasSet(fs, "local-port"),
+		noServe:      *noServe,
+		open:         *open,
+		forwardOnly:  *forwardOnly,
 	}, nil
 }
 
@@ -154,6 +156,10 @@ func remoteConnectCLI(args []string, version string) int {
 	}
 	name := syntax.name
 	if entry, ok := wslEntry(name); ok {
+		if err := refuseSSHOnlyConnectFlags(name, syntax); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return 1
+		}
 		return remoteWSLConnect(name, entry, syntax, version)
 	}
 
@@ -331,12 +337,33 @@ func resolveRemoteCLIDownload(ctx context.Context, version, goos, goarch string)
 	return releaseasset.ResolveCLIDownload(ctx, client, releaseasset.StudioLine, version, goos, goarch)
 }
 
+// refuseSSHOnlyConnectFlags rejects the flags whose meaning belongs to the SSH
+// client. A WSL distribution has no ssh hop to skip, no persisted forwards to
+// apply, and no tunnel to bind a local port for, so accepting them would
+// describe a connect this command does not perform.
+func refuseSSHOnlyConnectFlags(name string, syntax remoteConnectSyntax) error {
+	var flags []string
+	if syntax.noServe {
+		flags = append(flags, "--no-serve")
+	}
+	if syntax.forwardOnly {
+		flags = append(flags, "--forward-only")
+	}
+	if syntax.localPortSet {
+		flags = append(flags, "--local-port")
+	}
+	if len(flags) == 0 {
+		return nil
+	}
+	return fmt.Errorf("%w: %q is a WSL machine; these flags only apply to ssh hosts: %s", remote.ErrNotSSHHost, name, strings.Join(flags, ", "))
+}
+
 const remoteServeUsage = "usage: reasonix remote serve start|stop|status|logs <name> [--workspace PATH] [-n N]"
 
 // idleTimeoutFor is the per-host idle policy, with the global [remote] value
 // filling in a host that does not override it. A negative duration means the
-// kernel is left running until stopped; zero means it exits as soon as no
-// client is connected.
+// kernel is left running until stopped; a positive one is its no-client exit
+// window.
 func idleTimeoutFor(entry config.RemoteHostEntry, cfg *config.Config) *time.Duration {
 	d := entry.IdleTimeout(cfg.Remote.IdleTimeoutMinutes)
 	return &d
@@ -451,6 +478,10 @@ func remoteStatusCLI(args []string) int {
 		fmt.Fprintf(os.Stderr, "no remote host named %q\n", name)
 		return 1
 	}
+	if entry.HostKind() == config.RemoteKindWSL {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, fmt.Errorf("%w: %q is a WSL machine, which has no ssh status to probe", remote.ErrNotSSHHost, name))
+		return 1
+	}
 	fmt.Printf("host %s: %s@%s workspace=%s\n", entry.Name, entry.User, entry.Host, entry.Workspace)
 	return 0
 }
@@ -483,6 +514,10 @@ func remoteForwardLs(host string) int {
 	entry, ok := cfg.RemoteHost(host)
 	if !ok {
 		fmt.Fprintf(os.Stderr, "no remote host named %q\n", host)
+		return 1
+	}
+	if entry.HostKind() == config.RemoteKindWSL {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, fmt.Errorf("%w: %q is a WSL machine, which has no ssh forwards", remote.ErrNotSSHHost, host))
 		return 1
 	}
 	if len(entry.Forwards) == 0 {

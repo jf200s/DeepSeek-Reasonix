@@ -295,10 +295,10 @@ func TestEditingAHostKeepsForwardsThePageCannotSee(t *testing.T) {
 // row whole, so each has to carry the field forward itself.
 func TestRemoteHostSaveKeepsTheIdleTimeoutThePageCannotSee(t *testing.T) {
 	front := bookServer(t, &stubAttacher{})
-	zero := 0
+	minutes := 5
 	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
 		return nil, c.UpsertRemoteHost(config.RemoteHostEntry{
-			Name: "gpu-box", Host: "10.0.0.4", IdleTimeoutMinutes: &zero,
+			Name: "gpu-box", Host: "10.0.0.4", IdleTimeoutMinutes: &minutes,
 		})
 	}); err != nil {
 		t.Fatal(err)
@@ -310,7 +310,7 @@ func TestRemoteHostSaveKeepsTheIdleTimeoutThePageCannotSee(t *testing.T) {
 	if entry.Host != "10.0.0.9" {
 		t.Fatalf("the edit did not land: %+v", entry)
 	}
-	if entry.IdleTimeoutMinutes == nil || *entry.IdleTimeoutMinutes != 0 {
+	if entry.IdleTimeoutMinutes == nil || *entry.IdleTimeoutMinutes != minutes {
 		t.Fatalf("the edit dropped the idle timeout: %v", entry.IdleTimeoutMinutes)
 	}
 

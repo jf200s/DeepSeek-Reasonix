@@ -127,8 +127,8 @@ func editUserConfig(mutate func(*config.Config) error) error {
 const remoteAddUsage = "usage: reasonix remote add <name> [user@]host[:port] [flags]"
 
 // flagWasSet reports whether name was given on the command line. Needed for a
-// value whose zero is meaningful: --idle-timeout 0 exits at once, so absence
-// cannot be read off the parsed value.
+// value whose absence has its own meaning: without --idle-timeout an existing
+// host keeps the value it has, which the parsed default cannot tell apart.
 func flagWasSet(fs *flag.FlagSet, name string) bool {
 	set := false
 	fs.Visit(func(f *flag.Flag) {
@@ -161,7 +161,7 @@ func remoteAddCLI(args []string) int {
 	// never idle-exited, while a WSL distribution exits after 10 minutes. Only a
 	// value given on the command line is recorded, so the flag default stays 0
 	// and the help text names both kinds' behaviour.
-	idleTimeout := fs.Int("idle-timeout", 0, "minutes a kernel may sit idle before it exits (0 = at once, -1 = never; default: WSL 10, SSH never)")
+	idleTimeout := fs.Int("idle-timeout", 0, "minutes a kernel may sit idle before it exits (1..1440, -1 = never; default: WSL 10, SSH never)")
 	passphraseEnv := fs.String("passphrase-env", "", "env var name holding the key passphrase")
 	passwordEnv := fs.String("password-env", "", "env var name holding the login password")
 	if code, ok := parseCommandFlags(fs, args[2:]); !ok {

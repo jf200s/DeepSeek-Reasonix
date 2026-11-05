@@ -99,6 +99,23 @@ func (r *Link) Resolve(host, workspace string) (serve.RemoteEndpoint, bool) {
 	}, true
 }
 
+// EnsureEndpoint is Resolve with a repair step: a request about to call this
+// pane's kernel first lets the pool probe it, and relaunch it when it has gone.
+// An answer of false leaves the caller on its last snapshot, which then fails
+// as an unreachable kernel rather than as a request never sent.
+func (r *Link) EnsureEndpoint(ctx context.Context, host, workspace string) (serve.RemoteEndpoint, bool) {
+	ep, ok := r.pool.EnsureEndpoint(ctx, host, workspace)
+	if !ok {
+		return serve.RemoteEndpoint{}, false
+	}
+	return serve.RemoteEndpoint{
+		Host:      ep.Host,
+		Workspace: ep.Workspace,
+		Addr:      ep.Addr,
+		Token:     ep.Token,
+	}, true
+}
+
 // Browse lists folders over the connection alone. The pool holds the link for
 // a moment afterwards, so walking down a tree is one login rather than one per
 // step — and nothing is installed on the far side to answer it, which is what

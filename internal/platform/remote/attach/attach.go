@@ -128,14 +128,16 @@ func (g *gate) wait(ctx context.Context) error {
 
 type link struct {
 	gate
-	host    string
-	client  Link
-	install string // the host entry's own strategy, read once at dial
+	host string
+	// client is the connection every launch rides. Written once at dial.
+	client Link
 	// provider is where this host's model credentials come from, read at dial
-	// beside install. A host set to resolve its own gets no broker forward.
+	// beside the policy below. A host set to resolve its own gets no broker
+	// forward.
 	provider string
-	// idleTimeout is how long a kernel here may sit with no client before it
-	// exits, read at dial. Nil (a host not in the book) takes the default.
+	// install and idleTimeout are the host's current policy, read at dial and
+	// refreshed by a later attach; p.mu guards both once the link is ready.
+	install     string
 	idleTimeout *time.Duration
 	refs        int
 	spaces      map[string]*space
@@ -230,7 +232,12 @@ func (p *Pool) relaunch(l *link, client Link) {
 		if !held {
 			continue
 		}
-		if err := p.launch(p.ctx, l, s, s.key, Call{}); err != nil {
+		// The same lock a request-path ensure takes: a relaunch and a probe
+		// that both found the kernel gone must still produce one launch.
+		s.ensure.Lock()
+		err := p.launch(p.ctx, l, s, s.key, Call{})
+		s.ensure.Unlock()
+		if err != nil {
 			p.record(l, func(st *HostState) { st.Err = err.Error() })
 			continue
 		}
@@ -344,6 +351,13 @@ type space struct {
 	token     string
 	forward   string
 	refs      int
+	// ensure serialises a liveness check and the relaunch that may follow, so
+	// a burst of requests for one workspace pays for one probe and one kernel.
+	ensure sync.Mutex
+	// probedAt and probedOK are the last liveness answer; a short window keeps
+	// a busy pane from probing the kernel on every request.
+	probedAt time.Time
+	probedOK bool
 }
 
 // Attach makes host's workspace reachable locally. ctx bounds this attach, but
@@ -371,6 +385,9 @@ func (p *Pool) Attach(ctx context.Context, host, workspace string, call Call) (*
 	s, server := p.holdSpace(l, workspace)
 	if server {
 		p.serve(ctx, l, s, workspace, call)
+	} else if err := p.ensureAttach(ctx, l, s, call); err != nil {
+		p.dropSpace(l, s, unsubscribe)
+		return nil, err
 	}
 	if err := s.wait(ctx); err != nil {
 		p.dropSpace(l, s, unsubscribe)
@@ -443,10 +460,12 @@ func (p *Pool) dial(l *link, call Call) (unsubscribe func()) {
 	}
 	entry, configured := cfg.RemoteHost(l.host)
 	if configured {
-		l.install = entry.ServeInstallMode()
-		l.provider = entry.ProviderMode()
+		install := entry.ServeInstallMode()
+		provider := entry.ProviderMode()
 		idle := entry.IdleTimeout(cfg.Remote.IdleTimeoutMinutes)
-		l.idleTimeout = &idle
+		p.mu.Lock()
+		l.install, l.provider, l.idleTimeout = install, provider, &idle
+		p.mu.Unlock()
 	}
 	var client Link
 	if configured && entry.HostKind() == config.RemoteKindWSL {
@@ -565,9 +584,9 @@ func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, 
 		}
 		workspace = mapped
 	}
-	install := p.opts.Install
-	if install == "" {
-		install = l.install
+	install, idleTimeout := p.hostPolicy(l)
+	if p.opts.Install != "" {
+		install = p.opts.Install
 	}
 	// Before the launch, not after: the address goes on the serve command line,
 	// and a kernel already running cannot be told a new one.
@@ -579,7 +598,7 @@ func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, 
 		Workspace:       workspace,
 		Broker:          bootstrap.Broker{Addr: brokerAddr, Token: p.opts.Broker.Token},
 		Install:         install,
-		IdleTimeout:     l.idleTimeout,
+		IdleTimeout:     idleTimeout,
 		LocalBinary:     p.opts.LocalBinary,
 		LocalGOOS:       runtime.GOOS,
 		LocalGOARCH:     runtime.GOARCH,
@@ -600,12 +619,18 @@ func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, 
 	// Named per workspace: a second one on this host must not replace the
 	// first one's forward, which one shared reserved name would do.
 	name := "serve:" + res.State.Workspace
-	bound, err := l.client.Forwards().Add(forward.Spec{
+	spec := forward.Spec{
 		Name:       name,
 		Direction:  forward.Local,
 		BindAddr:   "127.0.0.1:0",
 		TargetAddr: res.State.Addr,
-	})
+	}
+	bound, err := l.client.Forwards().Add(spec)
+	if errors.Is(err, forward.ErrDuplicateForward) {
+		// The kernel this workspace was on stopped answering; its forward still
+		// holds the name, so repoint the same registration at the new kernel.
+		bound, err = l.client.Forwards().Replace(spec)
+	}
 	if err != nil {
 		return fmt.Errorf("forward remote serve: %w", err)
 	}
@@ -616,6 +641,9 @@ func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, 
 	// to that kernel when a pane opens a workspace on it.
 	s.workspace, s.addr, s.token, s.forward = res.Workspace, bound, res.Token, name
 	p.mu.Unlock()
+	// The launch itself proved the kernel is there, so the next request does
+	// not probe the process it just started.
+	s.probedAt, s.probedOK = time.Now(), true
 	return nil
 }
 

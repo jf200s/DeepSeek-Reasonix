@@ -1157,9 +1157,9 @@ func (c *Config) SaveTo(path string) error {
 	if c.editLoadErr != nil {
 		return fmt.Errorf("save config loaded from %q: %w", path, c.editLoadErr)
 	}
-	// Never write a per-host idle timeout the loader would refuse on the next
-	// start: name the host now rather than leaving an unloadable file behind.
-	if err := validateRemoteHostIdleTimeouts(c.Remote.Hosts); err != nil {
+	// Never write an idle timeout the loader would refuse on the next start:
+	// name the setting now rather than leaving an unloadable file behind.
+	if err := validateRemoteIdleTimeouts(c.Remote.IdleTimeoutMinutes, c.Remote.Hosts); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 	scope := renderScopeForPath(path)
@@ -1193,7 +1193,7 @@ func (c *Config) SaveToScope(path string, scope RenderScope) error {
 	}
 	// Same guard as SaveTo: the scope chosen by a caller does not change what
 	// the file must be able to decode to on the next load.
-	if err := validateRemoteHostIdleTimeouts(c.Remote.Hosts); err != nil {
+	if err := validateRemoteIdleTimeouts(c.Remote.IdleTimeoutMinutes, c.Remote.Hosts); err != nil {
 		return fmt.Errorf("save config: %w", err)
 	}
 	userConfig := scope == RenderScopeUser || (scope == RenderScopeFull && isUserConfigPath(path))

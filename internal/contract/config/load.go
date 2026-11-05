@@ -678,10 +678,10 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 	if err != nil {
 		return nil, err
 	}
-	// The edit path decodes the same [remote.hosts] book, so it refuses an
-	// out-of-range per-host idle timeout before any migration save can rewrite
-	// the file around it.
-	if err := validateRemoteHostIdleTimeouts(cfg.Remote.Hosts); err != nil {
+	// The edit path decodes the same [remote] section, so it refuses an
+	// out-of-range global or per-host idle timeout before any migration save can
+	// rewrite the file around it.
+	if err := validateRemoteIdleTimeouts(cfg.Remote.IdleTimeoutMinutes, cfg.Remote.Hosts); err != nil {
 		return nil, err
 	}
 	markProjectEditProvenance(cfg, path, meta)

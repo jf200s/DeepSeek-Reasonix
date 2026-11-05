@@ -274,7 +274,7 @@ func TestRemoteStopAsksAboutTheHomeWhenNoWorkspaceIsConfigured(t *testing.T) {
 // unset WSL distribution takes the 10-minute reconnect window.
 func TestRemoteAddIdleTimeoutFlag(t *testing.T) {
 	isolateCLIConfigHome(t)
-	if code := remoteAddCLI([]string{"box", "dev@10.0.0.9", "--idle-timeout", "0"}); code != 0 {
+	if code := remoteAddCLI([]string{"box", "dev@10.0.0.9", "--idle-timeout", "5"}); code != 0 {
 		t.Fatalf("add with --idle-timeout = %d", code)
 	}
 	if code := remoteAddCLI([]string{"plain", "dev@10.0.0.10"}); code != 0 {
@@ -285,11 +285,11 @@ func TestRemoteAddIdleTimeoutFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	box, _ := cfg.RemoteHost("box")
-	if box.IdleTimeoutMinutes == nil || *box.IdleTimeoutMinutes != 0 {
-		t.Fatalf("box idle timeout = %v, want an explicit 0", box.IdleTimeoutMinutes)
+	if box.IdleTimeoutMinutes == nil || *box.IdleTimeoutMinutes != 5 {
+		t.Fatalf("box idle timeout = %v, want an explicit 5", box.IdleTimeoutMinutes)
 	}
-	if box.IdleTimeout(nil) != 0 {
-		t.Fatalf("box IdleTimeout = %v, want 0", box.IdleTimeout(nil))
+	if box.IdleTimeout(nil) != 5*time.Minute {
+		t.Fatalf("box IdleTimeout = %v, want 5m", box.IdleTimeout(nil))
 	}
 	plain, _ := cfg.RemoteHost("plain")
 	if plain.IdleTimeoutMinutes != nil || plain.IdleTimeout(nil) >= 0 {
@@ -306,7 +306,7 @@ func TestRemoteAddIdleTimeoutFlag(t *testing.T) {
 		t.Fatal(err)
 	}
 	box, _ = cfg.RemoteHost("box")
-	if box.IdleTimeoutMinutes == nil || *box.IdleTimeoutMinutes != 0 {
+	if box.IdleTimeoutMinutes == nil || *box.IdleTimeoutMinutes != 5 {
 		t.Fatalf("re-adding dropped the idle timeout: %v", box.IdleTimeoutMinutes)
 	}
 

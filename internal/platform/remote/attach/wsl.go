@@ -324,6 +324,10 @@ func (loopbackForwards) Add(spec forward.Spec) (string, error) {
 	return spec.TargetAddr, nil
 }
 
+// Replace is the same direct route: there is no registration to swap, the
+// address itself is the forward.
+func (f loopbackForwards) Replace(spec forward.Spec) (string, error) { return f.Add(spec) }
+
 func (loopbackForwards) List() []forward.Entry { return nil }
 
 func (loopbackForwards) Remove(string) error { return nil }

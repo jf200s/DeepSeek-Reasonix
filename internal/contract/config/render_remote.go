@@ -19,7 +19,7 @@ func renderRemoteSection(b *strings.Builder, r RemoteConfig) {
 		b.WriteString("import_ssh_config = true   # surface ~/.ssh/config aliases in `reasonix remote import`\n")
 	}
 	if r.IdleTimeoutMinutes != nil {
-		fmt.Fprintf(b, "idle_timeout_minutes = %d   # exit a kernel after this long idle (0 = at once, -1 = never); unset: wsl %d min, ssh never\n", *r.IdleTimeoutMinutes, DefaultRemoteIdleTimeoutMinutes)
+		fmt.Fprintf(b, "idle_timeout_minutes = %d   # exit a kernel after this long idle (1..%d, -1 = never); unset: wsl %d min, ssh never\n", *r.IdleTimeoutMinutes, MaxRemoteIdleTimeoutMinutes, DefaultRemoteIdleTimeoutMinutes)
 	}
 	for _, h := range r.Hosts {
 		b.WriteString("\n[[remote.hosts]]\n")
@@ -71,7 +71,7 @@ func renderRemoteSection(b *strings.Builder, r RemoteConfig) {
 			b.WriteString("disabled = true   # kept in the book but not dialed\n")
 		}
 		if h.IdleTimeoutMinutes != nil {
-			fmt.Fprintf(b, "idle_timeout_minutes = %d   # this host's idle exit; 0 = at once, -1 = never\n", *h.IdleTimeoutMinutes)
+			fmt.Fprintf(b, "idle_timeout_minutes = %d   # this host's idle exit; 1..%d, -1 = never\n", *h.IdleTimeoutMinutes, MaxRemoteIdleTimeoutMinutes)
 		}
 		for _, f := range h.Forwards {
 			b.WriteString("\n[[remote.hosts.forwards]]\n")
