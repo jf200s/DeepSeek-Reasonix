@@ -15,7 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"regexp"
+	"reflect"
 	"sort"
 	"strings"
 	"sync"
@@ -23,16 +23,19 @@ import (
 	"unicode/utf8"
 
 	"github.com/dop251/goja"
+	"github.com/dop251/goja/ast"
+	"github.com/dop251/goja/parser"
 
 	"reasonix/internal/contract/tool"
 )
 
 // Tool is one callable tool as the program sees it.
 type Tool struct {
-	Name        string
-	Description string
-	Schema      json.RawMessage
-	ReadOnly    bool
+	Name           string
+	Description    string
+	Schema         json.RawMessage
+	ReadOnly       bool
+	ParallelUnsafe bool // a proxy can reach a writer through a read-only schema
 }
 
 // Limits bounds one program run. Zero values take the defaults.
@@ -109,10 +112,82 @@ var (
 	ErrNested = errors.New("run_code cannot be called from inside a program")
 )
 
-// awaitPattern finds an await expression. run_code is synchronous by design,
-// and a program that waits for a promise it can never resolve would otherwise
-// time out instead of telling the model what to fix.
-var awaitPattern = regexp.MustCompile(`(?m)(^|[^\w.])await\s+`)
+// run_code is synchronous by design, so an await expression is refused up
+// front instead of timing out the program. The source is parsed rather than
+// scanned, so "await" inside a string, comment or template literal is not
+// mistaken for one.
+const awaitRefusal = "run_code is synchronous and cannot await; remove `await` and call tools directly"
+
+var astPkg = reflect.TypeOf(ast.Program{}).PkgPath()
+
+// hasAwait reports whether program contains a real await expression. The
+// synchronous parse rejects top-level await at parse time, so that case is
+// parsed again inside an async function, where it becomes an await node.
+func hasAwait(program string) bool {
+	if fn, err := parser.ParseFunction("", program); err == nil {
+		return awaitIn(reflect.ValueOf(fn), map[uintptr]bool{})
+	}
+	prog, err := parser.ParseFile(nil, "run_code.js", "(async function(){\n"+program+"\n})", 0)
+	if err != nil {
+		return false
+	}
+	return awaitIn(reflect.ValueOf(prog), map[uintptr]bool{})
+}
+
+// awaitIn reflects over the AST because goja exports its nodes but no visitor.
+// Only ast-package nodes are followed, so file and source fields stay out.
+func awaitIn(v reflect.Value, seen map[uintptr]bool) bool {
+	if !v.IsValid() {
+		return false
+	}
+	switch v.Kind() {
+	case reflect.Interface:
+		if v.IsNil() {
+			return false
+		}
+		return awaitIn(v.Elem(), seen)
+	case reflect.Pointer:
+		if v.IsNil() {
+			return false
+		}
+		if v.CanInterface() {
+			switch node := v.Interface().(type) {
+			case *ast.AwaitExpression:
+				return true
+			case *ast.ForOfStatement:
+				if node.Await {
+					return true
+				}
+			}
+		}
+		ptr := v.Pointer()
+		if seen[ptr] {
+			return false
+		}
+		seen[ptr] = true
+		return awaitIn(v.Elem(), seen)
+	case reflect.Struct:
+		if v.Type().PkgPath() != astPkg {
+			return false
+		}
+		for i := 0; i < v.NumField(); i++ {
+			field := v.Field(i)
+			if !field.CanInterface() {
+				continue
+			}
+			if awaitIn(field, seen) {
+				return true
+			}
+		}
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < v.Len(); i++ {
+			if awaitIn(v.Index(i), seen) {
+				return true
+			}
+		}
+	}
+	return false
+}
 
 // Engine runs programs against a fixed tool set.
 type Engine struct {
@@ -159,8 +234,8 @@ func (e *Engine) Run(ctx context.Context, program string) (string, error) {
 	if !ok {
 		return "", ErrNoInvoker
 	}
-	if awaitPattern.MatchString(program) {
-		return "", fmt.Errorf("%w: run_code is synchronous and cannot await; remove `await` (and Promises) and call tools directly", ErrProgramFailed)
+	if hasAwait(program) {
+		return "", fmt.Errorf("%w: %s", ErrProgramFailed, awaitRefusal)
 	}
 	runCtx, cancel := context.WithTimeout(ctx, e.limits.Timeout)
 	defer cancel()
@@ -421,6 +496,10 @@ func (r *programRun) parallel(call goja.FunctionCall) (goja.Value, error) {
 		}
 		if !t.ReadOnly {
 			results[i] = parallelResult{errText: "parallel is read-only; call writers sequentially"}
+			continue
+		}
+		if t.ParallelUnsafe {
+			results[i] = parallelResult{errText: fmt.Sprintf("parallel cannot run the proxy tool %q; call it directly", name)}
 			continue
 		}
 		args, err := r.arguments(entryObj.Get("args"))
