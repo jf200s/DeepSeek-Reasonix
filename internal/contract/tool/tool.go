@@ -393,14 +393,10 @@ type Registry struct {
 	// schema. Nil means every registered tool is provider-visible (tests and
 	// legacy direct construction).
 	providerVisible map[string]bool
-	// providerExclusive pins providerVisible as a deliberate, closed surface:
-	// while set, ShowToProvider refuses additions and AddProviderVisibleTools
-	// does nothing. An explicit set replaces the surface and clears the pin.
-	providerExclusive bool
-	// providerSurfaceAuthoritative marks providerVisible as a declared,
-	// authoritative surface rather than an advisory default. An exclusive pin
-	// and the advisory setter both report false.
-	providerSurfaceAuthoritative bool
+	// providerSurface records how providerVisible was set. Only the
+	// authoritative mode is inherited by delegated children, which intersect
+	// their own tools with it; see ProviderSurfaceMode.
+	providerSurface ProviderSurfaceMode
 	// admit, when non-nil, is the ceiling on what this registry may ever hold:
 	// Add refuses every tool it rejects, so no later registration path can widen it.
 	admit     func(Tool) bool
@@ -417,40 +413,6 @@ func NewRegistry() *Registry {
 		disabledMCP:         map[string]bool{},
 		disabledMCPByServer: map[string]map[string]bool{},
 	}
-}
-
-// ProviderVisible reports whether name is currently provider-visible.
-func (r *Registry) ProviderVisible(name string) bool {
-	if r == nil {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	if r.providerVisible == nil {
-		return true
-	}
-	return r.providerVisible[strings.TrimSpace(name)]
-}
-
-// ProviderSurfacePinned reports whether name belongs to an explicit
-// provider-visible allowlist. Unlike ProviderVisible it is false when no
-// allowlist is set: a registry that shows whatever it holds promises nothing
-// about which names a provider sees, so nothing has to be held back to keep
-// that promise.
-func (r *Registry) ProviderSurfacePinned(name string) bool {
-	if r == nil {
-		return false
-	}
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-	return r.providerVisible != nil && r.providerVisible[strings.TrimSpace(name)]
-}
-
-func (r *Registry) isProviderVisibleLocked(name string) bool {
-	if r.providerVisible == nil {
-		return true
-	}
-	return r.providerVisible[name]
 }
 
 // Add inserts (or replaces) a tool, preserving first-seen order. The schema is
