@@ -37,10 +37,10 @@ func (*runCode) Description() string {
 	return "Run a short JavaScript program (the body of a synchronous function) that calls tools, so several dependent steps take one round trip and only what it logs or returns comes back. " +
 		"Use it to read or search many files and keep only what matters, run a command and act on its output, or repeat one tool over a list. " +
 		"In the program: tools.<name>(args) calls a tool synchronously and returns its output as a string, throwing if the call fails (read_file returns the file's exact text, ready to edit and pass to write_file); " +
-		"tools.tryCall(name, args) returns {ok, output, error} instead of throwing; tools.parallel(calls, concurrency?) runs read-only tools concurrently and returns {ok, output, error}[]; " +
+		"tools.tryCall(name, args) returns {ok, output, error} instead of throwing; tools.parallel(calls, concurrency?) runs read-only tools concurrently, but not proxy tools, and returns {ok, output, error}[]; " +
 		"log(...) and console.log(...) capture output and a returned value is included too. " +
 		"Every call is checked and approved exactly as if you made it directly. The program has no file or network access of its own, " +
-		"but Date and Math (including a real clock and random numbers) are available; it is synchronous (no await or Promises) and cannot call run_code. " +
+		"but Date and Math (including a real clock and random numbers) are available; it is synchronous (no await), and Promise callbacks still run before it returns. It cannot call run_code. " +
 		"Prefer ordinary calls for one or two independent steps."
 }
 

@@ -15,7 +15,8 @@ const contractBudget = 24_000
 const contractHeader = "Run a synchronous JavaScript function body (plain JavaScript, no TypeScript, no imports, no `await`).\n" +
 	"Only log(...) / console.log(...) output and the returned value enter the conversation.\n" +
 	"Every tool call here is permission-checked, approved and observed exactly like a direct call.\n" +
-	"tools.parallel(calls, concurrency?) runs read-only tools concurrently; call writers sequentially.\n" +
+	"tools.parallel(calls, concurrency?) runs read-only tools concurrently; call writers and proxy tools sequentially.\n" +
+	"Promise callbacks run before the program returns, after its synchronous body finishes.\n" +
 	"\n" +
 	"tools:\n"
 

@@ -339,14 +339,97 @@ func TestReturnValueFormatting(t *testing.T) {
 }
 
 func TestAwaitFailsFast(t *testing.T) {
+	programs := []string{
+		`const x = await tools.read_file({path: "a"});`,
+		`for await (const x of []) {}`,
+		`const f = async () => { await 1; }; return f();`,
+	}
+	for _, program := range programs {
+		inv := &fakeInvoker{}
+		e := NewEngine([]Tool{{Name: "read_file", ReadOnly: true}}, DefaultLimits())
+		_, err := runEngine(t, e, inv, program)
+		if !errors.Is(err, ErrProgramFailed) || !strings.Contains(err.Error(), "cannot await") {
+			t.Fatalf("%s: err = %v, want an await refusal", program, err)
+		}
+		if len(inv.recorded()) != 0 {
+			t.Fatalf("%s: calls = %q, want none", program, inv.recorded())
+		}
+	}
+}
+
+// The word await is common in prose and file contents the program copies, and a
+// program that mentions it is not waiting on anything.
+func TestAwaitTextInStringsAndCommentsRuns(t *testing.T) {
 	inv := &fakeInvoker{}
 	e := NewEngine([]Tool{{Name: "read_file", ReadOnly: true}}, DefaultLimits())
-	_, err := runEngine(t, e, inv, `const x = await tools.read_file({path: "a"});`)
-	if !errors.Is(err, ErrProgramFailed) || !strings.Contains(err.Error(), "await") {
-		t.Fatalf("err = %v, want an await hint", err)
+	program := "// await tools.read_file({path: \"comment\"})\n" +
+		"const note = \"await the next step\";\n" +
+		"const tpl = `/* await */ ${note}`;\n" +
+		"/* await tools.bash({command: \"false\"}) */\n" +
+		"const re = /await/;\n" +
+		"log(tpl);\n" +
+		"log(re.test(note));\n" +
+		"return tools.read_file({path: \"a.go\"});"
+	out, err := runEngine(t, e, inv, program)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
 	}
-	if len(inv.recorded()) != 0 {
-		t.Fatalf("calls = %q, want none", inv.recorded())
+	want := "/* await */ await the next step\ntrue\ncontents of a.go\n--- 1 tool call(s): read_file ×1"
+	if out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+}
+
+// Promises are allowed: goja drains its job queue when the top-level function
+// returns, so a callback's tool call lands before the result reaches the model.
+func TestPromiseCallbacksRunBeforeTheProgramReturns(t *testing.T) {
+	inv := &fakeInvoker{}
+	e := NewEngine([]Tool{{Name: "read_file", ReadOnly: true}}, DefaultLimits())
+	out, err := runEngine(t, e, inv, `
+Promise.resolve().then(() => log(tools.read_file({path: "later"})));
+log("before");
+return "done";
+`)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := "before\ncontents of later\ndone\n--- 1 tool call(s): read_file ×1"
+	if out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+	if calls := inv.recorded(); len(calls) != 1 || calls[0] != `read_file {"path":"later"}` {
+		t.Fatalf("calls = %q", calls)
+	}
+}
+
+// A proxy declares ReadOnly because the target is only known after resolution,
+// so parallel cannot prove it is safe and must refuse it outright.
+func TestParallelRefusesProxyTools(t *testing.T) {
+	inv := &fakeInvoker{}
+	e := NewEngine([]Tool{
+		{Name: "read_file", ReadOnly: true},
+		{Name: "use_capability", ReadOnly: true, ParallelUnsafe: true},
+	}, DefaultLimits())
+	out, err := runEngine(t, e, inv, `
+const r = tools.parallel([
+  {name: "use_capability", args: {action: "call", capability_id: "tool:write_file"}},
+  {name: "read_file", args: {path: "a"}}
+]);
+for (const x of r) log(x.ok, x.output || "-", x.error || "-");
+return r.length;
+`)
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := "false - parallel cannot run the proxy tool \"use_capability\"; call it directly\n" +
+		"true contents of a -\n" +
+		"2\n" +
+		"--- 1 tool call(s): read_file ×1"
+	if out != want {
+		t.Fatalf("out = %q, want %q", out, want)
+	}
+	if calls := inv.recorded(); len(calls) != 1 || calls[0] != `read_file {"path":"a"}` {
+		t.Fatalf("calls = %q; a proxy must not run in parallel", calls)
 	}
 }
 

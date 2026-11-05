@@ -60,6 +60,18 @@ func TestSchemaShape(t *testing.T) {
 	}
 }
 
+func TestDescriptionStatesPromiseAndParallelRules(t *testing.T) {
+	desc := New(nil, ptc.DefaultLimits()).Description()
+	for _, want := range []string{"no await", "Promise callbacks still run before it returns", "not proxy tools"} {
+		if !strings.Contains(desc, want) {
+			t.Fatalf("description does not say %q: %q", want, desc)
+		}
+	}
+	if strings.Contains(desc, "Promises)") {
+		t.Fatalf("description still claims Promises are refused: %q", desc)
+	}
+}
+
 func TestEmptyAndOversizedCode(t *testing.T) {
 	ctx := tool.WithInvoker(t.Context(), &fakeInvoker{})
 	if _, err := execute(t, ctx, "   \n\t"); err == nil || !strings.Contains(err.Error(), "code is required") {

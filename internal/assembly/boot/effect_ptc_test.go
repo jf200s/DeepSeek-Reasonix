@@ -374,6 +374,126 @@ model = "x"
 	}
 }
 
+// ptcProxyTool is a use_capability-shaped CallResolver: its schema declares
+// read-only, but the target it resolves to may be a writer.
+type ptcProxyTool struct{}
+
+func (ptcProxyTool) Name() string            { return "use_capability" }
+func (ptcProxyTool) Description() string     { return "Call a deferred capability." }
+func (ptcProxyTool) Schema() json.RawMessage { return json.RawMessage(`{"type":"object"}`) }
+func (ptcProxyTool) ReadOnly() bool          { return true }
+func (ptcProxyTool) Execute(context.Context, json.RawMessage) (string, error) {
+	return "", nil
+}
+func (ptcProxyTool) ResolveCall(context.Context, json.RawMessage) (tool.ResolvedCall, error) {
+	return tool.ResolvedCall{DisplayName: "use_capability", TargetName: "write_file", ReadOnly: false}, nil
+}
+
+// parallel may only run what it can prove reads, and a proxy's read-only schema
+// proves nothing about the target: ptc must mark it so the engine refuses it.
+func TestPTCToolsMarkProxyToolsParallelUnsafe(t *testing.T) {
+	t.Parallel()
+	reg := tool.NewRegistry()
+	reg.Add(ptcReadTool{})
+	reg.Add(ptcProxyTool{})
+	got := ptcTools(reg, nil, nil)
+	byName := make(map[string]ptc.Tool, len(got))
+	for _, tl := range got {
+		byName[tl.Name] = tl
+	}
+	for _, name := range []string{"read_file", "use_capability"} {
+		if _, ok := byName[name]; !ok {
+			t.Fatalf("ptcTools = %v, missing %s", got, name)
+		}
+	}
+	if byName["read_file"].ParallelUnsafe {
+		t.Fatalf("read_file = %+v, want ParallelUnsafe false", byName["read_file"])
+	}
+	if !byName["use_capability"].ParallelUnsafe {
+		t.Fatalf("use_capability = %+v, want ParallelUnsafe true", byName["use_capability"])
+	}
+}
+
+func runCodeCall(id, code string) provider.ToolCall {
+	args, err := json.Marshal(map[string]string{"code": code})
+	if err != nil {
+		panic(err)
+	}
+	return provider.ToolCall{ID: id, Name: runcode.Name, Arguments: string(args)}
+}
+
+// A program's tools.parallel runs read-only tools, and use_capability declares
+// itself read-only whatever target it later resolves to. Refusing it is the
+// only safe answer: running it in parallel would write beside the read calls.
+func TestEffectPTCParallelRefusesProxyWriter(t *testing.T) {
+	run := buildPostureRun(t, "[tools.ptc]\nenabled = true\nexclusive = true\n", runCodeCall("p", `
+const r = tools.parallel([
+  {name: "use_capability", args: {action: "call", capability_id: "tool:write_file", arguments: {path: "parallel.txt", content: "written"}}}
+]);
+log("ok:", r[0].ok);
+log("error:", r[0].error);
+return "parallel done";
+`))
+	run.runIn(t, control.ToolApprovalYolo)
+	if _, err := os.Stat(filepath.Join(run.dir, "parallel.txt")); err == nil {
+		t.Fatal("use_capability wrote through tools.parallel")
+	}
+	saw := run.modelSaw(t, "p")
+	for _, want := range []string{"ok: false", `parallel cannot run the proxy tool "use_capability"; call it directly`, "parallel done"} {
+		if !strings.Contains(saw, want) {
+			t.Fatalf("the program was told %q, missing %q", saw, want)
+		}
+	}
+}
+
+// Exclusive PTC leaves run_code as the model's only tool, so Plan mode has to
+// admit it for research to happen at all. What the program does is still
+// phase-checked call by call: the read lands, the write is refused.
+func TestEffectPTCExclusivePlanAllowsReadsAndRefusesWrites(t *testing.T) {
+	run := buildPostureRun(t, "[tools.ptc]\nenabled = true\nexclusive = true\n", runCodeCall("p", `
+const src = tools.read_file({path: "src.txt"});
+log("read:", src.trim());
+const w = tools.tryCall("write_file", {path: "written.txt", content: "nope"});
+log("write ok:", w.ok);
+log("write error:", w.error);
+return "plan program done";
+`))
+	writeFile(t, run.dir, "src.txt", "hello\n")
+	run.ctrl.SetPlanMode(true)
+	run.runIn(t, control.ToolApprovalYolo)
+	if _, err := os.Stat(filepath.Join(run.dir, "written.txt")); err == nil {
+		t.Fatal("a program wrote during Plan mode")
+	}
+	saw := run.modelSaw(t, "p")
+	for _, want := range []string{"read: hello", "write ok: false", "side effect during planning", "plan program done"} {
+		if !strings.Contains(saw, want) {
+			t.Fatalf("the model read %q, missing %q", saw, want)
+		}
+	}
+	if strings.Contains(saw, "Plan mode is still planning") {
+		t.Fatalf("run_code itself was refused during Plan mode: %q", saw)
+	}
+}
+
+// Outside exclusive mode run_code is an ordinary writer, and Plan mode keeps
+// refusing it before any of its program runs.
+func TestEffectPTCNonExclusivePlanStillRefusesRunCode(t *testing.T) {
+	run := buildPostureRun(t, "[tools.ptc]\nenabled = true\nexclusive = false\n", runCodeCall("p", `
+return tools.write_file({path: "written.txt", content: "nope"});
+`))
+	run.ctrl.SetPlanMode(true)
+	run.runIn(t, control.ToolApprovalYolo)
+	if _, err := os.Stat(filepath.Join(run.dir, "written.txt")); err == nil {
+		t.Fatal("a program wrote during Plan mode")
+	}
+	saw := run.modelSaw(t, "p")
+	for _, want := range []string{`"run_code"`, "Plan mode is still planning", "declared_writer"} {
+		if !strings.Contains(saw, want) {
+			t.Fatalf("the model read %q, missing %q", saw, want)
+		}
+	}
+}
+
 // The program writes, reads back, and is refused an rm. Written as the body of
 // a synchronous function: no await, no TypeScript.
 const ptcUnderTest = `

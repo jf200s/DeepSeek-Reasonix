@@ -142,6 +142,18 @@ func TestContractNeverExceedsBudget(t *testing.T) {
 	}
 }
 
+func TestContractStatesPromiseAndProxyRules(t *testing.T) {
+	got := Contract(nil)
+	for _, want := range []string{"Promise callbacks run before the program returns", "call writers and proxy tools sequentially"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("contract does not say %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "Promises)") {
+		t.Fatalf("contract still claims Promises are refused:\n%s", got)
+	}
+}
+
 func TestContractRendersUnknownAndDeepTypes(t *testing.T) {
 	tools := []Tool{{
 		Name: "odd",

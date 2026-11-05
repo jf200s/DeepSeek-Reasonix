@@ -60,13 +60,20 @@ func (b *builder) attachPTC() error {
 		pinned = pinnedMCPServers(b.tools.mcp.alwaysLoad, b.tools.mcpSchemaKnown)
 	}
 	tools := ptcTools(b.tools.reg, b.cfg.DisabledTools(), alwaysLoadedMCPTools(b.tools.reg, pinned))
-	b.tools.reg.Add(runcode.New(tools, ptc.Limits{
+	var rc tool.Tool = runcode.New(tools, ptc.Limits{
 		Timeout:         cfg.Timeout(),
 		MaxCalls:        cfg.MaxCalls,
 		MaxProgramBytes: cfg.MaxProgramBytes,
 		MaxOutputBytes:  cfg.MaxOutputBytes,
 		MaxParallel:     cfg.MaxParallel,
-	}))
+	})
+	if cfg.ExclusiveMode() {
+		// run_code is the only tool the model sees here, so the plan gate must
+		// admit it for research to happen at all; every call the program makes
+		// is checked again on its own and writers stay refused while planning.
+		rc = planSafeRunCode{Tool: rc}
+	}
+	b.tools.reg.Add(rc)
 	if _, ok := b.tools.reg.Get(runcode.Name); !ok {
 		if b.ptcRunCodeExcludedByUser() {
 			return ptcRunCodeDisabled()
@@ -104,6 +111,13 @@ func (b *builder) narrowPTC() error {
 	return nil
 }
 
+// planSafeRunCode declares run_code admissible during Plan mode. Exclusive
+// mode leaves it as the model's only tool, and its nested calls are phase-
+// checked one by one, so a writer inside the program is still refused.
+type planSafeRunCode struct{ tool.Tool }
+
+func (planSafeRunCode) PlanModeSafe() bool { return true }
+
 // ptcTools collects what a program may call: every registered tool except
 // run_code itself and run_script, whose nested calls are refused anyway.
 // Advertising a tool a program can never call would only invite the model to
@@ -128,11 +142,13 @@ func ptcTools(reg *tool.Registry, disabled, mcpVisible []string) []ptc.Tool {
 		if !ok {
 			continue
 		}
+		_, proxy := t.(tool.CallResolver)
 		out = append(out, ptc.Tool{
-			Name:        name,
-			Description: t.Description(),
-			Schema:      t.Schema(),
-			ReadOnly:    t.ReadOnly(),
+			Name:           name,
+			Description:    t.Description(),
+			Schema:         t.Schema(),
+			ReadOnly:       t.ReadOnly(),
+			ParallelUnsafe: proxy,
 		})
 	}
 	return out
