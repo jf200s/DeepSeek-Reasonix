@@ -580,7 +580,7 @@ export class SsePort extends SseWorkspace implements AgentPort {
     return this.post("/plan", { on });
   }
   setApprovalMode(mode: ApprovalMode) {
-    return this.post("/tool-approval-mode", { mode });
+    return this.postAcked("/tool-approval-mode", { mode });
   }
   decideWorkspaceTrust(trust: "trusted" | "declined") {
     return this.post("/workspace-trust", { trust });

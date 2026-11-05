@@ -691,10 +691,10 @@ Effective model and effort precedence is: per-profile
 
 `task` accepts optional `profile` and `write_paths`. `fleet` dispatches 2–64
 profile-aware tasks under a session scheduler
-(`agent.max_subagent_concurrency`, default 6; `agent.max_parallel_writers`,
-default 3). Profile names are resolved at runtime from the Skill store and
-must never enter tool schemas or the parent system prompt. Custom and named
-built-in profile bodies are the full child system prompt (no implicit
+(`agent.max_subagent_concurrency` and `agent.max_parallel_writers`, both
+default 0 = no limit). Profile names are resolved at runtime from the Skill
+store and must never enter tool schemas or the parent system prompt. Custom
+and named built-in profile bodies are the full child system prompt (no implicit
 concise default). `parallel_tasks` remains the compatible read-only batch
 API on the same scheduler. In a persisted parent session, parallel/fleet
 children save independent transcripts; the aggregate carries bounded previews
@@ -761,11 +761,15 @@ registry to that claim before the child runs:
 - after the run, the host compares the mutations it recorded against the claim
   and reports any outside path to the parent in the sub-agent's host receipts.
 
-Omitting `write_paths` is not an unscoped writer: the run claims the whole
-workspace and therefore serialises against every other writer claim. That claim
-is a scheduling boundary only — inside the workspace nothing is refused, because
-no concurrent writer can hold an overlapping claim at the same time. Writes that
-leave the workspace are still reported as claim violations.
+Omitting `write_paths` follows `[agent] subagent_claims`: `optimistic` (the
+default) reserves nothing up front and holds only the path being written;
+`strict` claims the whole workspace and serialises writers. `[agent]
+write_lease` is the separate cross-session control, never the sub-agent's own
+claim.
+
+The claim is a scheduling boundary only: inside the workspace nothing is
+refused, because no concurrent writer can hold an overlapping claim at the same
+time. Writes that leave the workspace are still reported as claim violations.
 
 Declaring paths is what buys parallelism; it costs `bash` on hosts where the OS
 sandbox cannot enforce write roots.
@@ -1185,6 +1189,15 @@ prefer = "auto"   # auto (default) | bash | powershell | pwsh — force the shel
 # [tools.shell.env]   # extra variables every bash command inherits (user-global; a project reasonix.toml cannot set this)
 # BASH_ENV = "~/.reasonix/bashsandbox.rc"
 # A preset runs before every command, read-only and verification runs included: keep it side-effect free and outside the workspace's writable roots. Remote workspaces and `reasonix review` do not carry it.
+
+[tools.ptc]   # user file only: a project reasonix.toml cannot enable it or change its limits
+# enabled = false            # run_code: one JavaScript program calls tools; only its log/return enters the conversation
+# exclusive = true           # hide every other tool from the main model; sub-agents keep their own surface
+# timeout_seconds = 120      # one program's wall clock; 0 = default (120s), capped at 600s
+# max_calls = 100            # host tool calls allowed in one program; 0 = default
+# max_program_bytes = 65536  # program source cap (64KiB); 0 = default
+# max_output_bytes = 65536   # what one program may send back (64KiB); 0 = default
+# max_parallel = 8           # tools.parallel concurrency for read-only tools; 0 = default, capped at 16
 
 [skills]
 # paths = ["~/my-skills", "../shared/skills"]   # extra custom skill roots

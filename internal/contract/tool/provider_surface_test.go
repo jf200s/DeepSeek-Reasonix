@@ -135,3 +135,54 @@ func TestShowToProviderWithoutARestrictionChangesNothing(t *testing.T) {
 		t.Fatal("hiding from an unrestricted registry changed what it shows")
 	}
 }
+
+func TestAuthoritativeSurfaceIsReportedAndAnAdvisorySetReplacesIt(t *testing.T) {
+	r := plainRegistry()
+	if r.ProviderSurfaceAuthoritative() {
+		t.Fatal("an unrestricted registry reported an authoritative surface")
+	}
+	r.SetProviderVisibleTools([]string{"alpha"})
+	if r.ProviderSurfaceAuthoritative() {
+		t.Fatal("the advisory setter marked its surface authoritative")
+	}
+	r.SetProviderVisibleToolsAuthoritative([]string{"alpha", "zulu"})
+	if !r.ProviderSurfaceAuthoritative() {
+		t.Fatal("the authoritative setter did not mark its surface")
+	}
+	if names := shownNames(r); len(names) != 2 || names[0] != "alpha" || names[1] != "zulu" {
+		t.Fatalf("authoritative surface = %v", names)
+	}
+	r.SetProviderVisibleTools([]string{"alpha"})
+	if r.ProviderSurfaceAuthoritative() {
+		t.Fatal("an advisory set left the authoritative mark in place")
+	}
+}
+
+func TestAuthoritativeSurfaceIsNotAnExclusivePin(t *testing.T) {
+	r := plainRegistry()
+	r.SetProviderVisibleToolsAuthoritative([]string{"alpha"})
+	r.SetProviderVisibleToolsExclusive([]string{"alpha"})
+	if r.ProviderSurfaceAuthoritative() {
+		t.Fatal("a pin was reported as an authoritative surface")
+	}
+	r.SetProviderVisibleToolsAuthoritative([]string{"alpha"})
+	if !r.ProviderSurfaceAuthoritative() {
+		t.Fatal("an authoritative set did not replace the pin")
+	}
+	r.ShowToProvider(true, "zulu")
+	if names := shownNames(r); len(names) != 2 {
+		t.Fatalf("authoritative set behaved as a pin: %v", names)
+	}
+	r.SetProviderVisibleToolsAuthoritative(nil)
+	if r.ProviderSurfaceAuthoritative() || len(shownNames(r)) != 3 {
+		t.Fatal("clearing an authoritative surface left it restricted or marked")
+	}
+}
+
+func TestAuthoritativeEmptySurfaceHidesEverything(t *testing.T) {
+	r := plainRegistry()
+	r.SetProviderVisibleToolsAuthoritative([]string{})
+	if !r.ProviderSurfaceAuthoritative() || len(shownNames(r)) != 0 {
+		t.Fatalf("empty authoritative surface: marked=%v shown=%v", r.ProviderSurfaceAuthoritative(), shownNames(r))
+	}
+}

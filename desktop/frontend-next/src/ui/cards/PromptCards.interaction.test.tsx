@@ -341,4 +341,42 @@ describe("decision cards", () => {
       { questionId: "style", selected: ["简短"] },
     ]);
   });
+
+  it("says a full-access switch was not confirmed, and clears that when it is tried again", async () => {
+    const item = {
+      t: "approval", id: "row", a: {
+        id: "gate", tool: "bash", subject: "python - <<'PY'", reasonCode: "dynamic_bash", allowsSession: true,
+      },
+    } as Extract<Item, { t: "approval" }>;
+    const fullAccess = vi.fn().mockResolvedValueOnce("unconfirmed").mockResolvedValueOnce(undefined);
+    render(<ApprovalCard item={item} onApprove={vi.fn(pending)} onFullAccess={fullAccess} onPlan={vi.fn(pending)} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "切换全部放行…" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认全部放行" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("没有收到内核确认"));
+    const confirm = screen.getByRole("button", { name: "确认全部放行" }) as HTMLButtonElement;
+    expect(confirm.disabled).toBe(false);
+
+    await userEvent.click(confirm);
+    await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+    expect(fullAccess).toHaveBeenCalledTimes(2);
+    expect(fullAccess).toHaveBeenCalledWith("row");
+  });
+
+  it("hands the full-access confirmation back when the switch is refused", async () => {
+    const item = {
+      t: "approval", id: "row", a: {
+        id: "gate", tool: "bash", subject: "python - <<'PY'", reasonCode: "dynamic_bash", allowsSession: true,
+      },
+    } as Extract<Item, { t: "approval" }>;
+    const failed = vi.fn();
+    const fullAccess = vi.fn(async () => { failed(new Error("kernel refused")); });
+    render(<ApprovalCard item={item} onApprove={vi.fn(pending)} onFullAccess={fullAccess} onPlan={vi.fn(pending)} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "切换全部放行…" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认全部放行" }));
+    await waitFor(() => expect((screen.getByRole("button", { name: "确认全部放行" }) as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByRole("alert")).toBeNull();
+    expect(failed).toHaveBeenCalledTimes(1);
+  });
 });
