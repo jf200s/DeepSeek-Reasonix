@@ -68,8 +68,8 @@ compact_ratio       = 0.85  # sole auto trigger; presets 0.70 (active) / 0.80 (s
 #                                   # A few dozen tokens per call and the verdict is cached. Empty falls
 #                                   # back to subagent_model, then the main model — set this to send the
 #                                   # classifications somewhere cheaper than the model doing the work.
-# max_subagent_concurrency = 6   # session-wide sub-agent concurrency (task/fleet/skills)
-# max_parallel_writers = 3       # concurrent writers with non-overlapping write_paths
+# max_subagent_concurrency = 0   # session-wide sub-agent concurrency (task/fleet/skills); 0 = no limit
+# max_parallel_writers = 0       # concurrent writers with non-overlapping write_paths; 0 = no limit, write claims keep writers apart
 # output_style = "explanatory"   # persona/tone folded into the prompt: explanatory | learning | concise,
 #                                  or a custom .reasonix/output-styles/<name>.md ; empty = default
 # [agent.persona]                  # the agent's identity, as opposed to output_style's tone.

@@ -183,18 +183,27 @@ For the full schema and every field's contract, see [`SPEC.md` §5](./SPEC.md#5-
 ### Programmatic tool calling (`run_code`)
 
 `[tools.ptc]` is **user file only**: a project `reasonix.toml` can neither turn
-it on nor change its limits. With `enabled = true` the model can write a short
-synchronous JavaScript program that calls the other tools; only what the program
-logs or returns enters the conversation, so several dependent steps cost one
-round trip. The program itself has no file or network access and cannot import
-modules; the standard JavaScript built-ins are available, including `Date` and
-`Math` (a real clock and random numbers). It is synchronous — `await` and
-Promises are refused — and it cannot call `run_code` from inside a program.
-Every call it makes is approved, hooked and observed exactly like a direct one.
-`tools.parallel(calls, concurrency?)` runs **read-only** tools concurrently; call
-writers sequentially. `exclusive` (default `true`) hides every other tool from
-the model, so all tool work goes through `run_code`; set it to `false` to keep
-the direct tools visible beside it.
+it on nor change its limits. With `enabled = true` the model writes a short
+synchronous JavaScript program that calls other tools; only what the program
+logs or returns enters the conversation, so dependent steps cost one round
+trip.
+
+It has no file or network access and cannot import modules. Built-ins such as
+`Date` and `Math` are available (a real clock and random numbers). Promises
+exist and their callbacks run before the program returns, but `await` is
+refused with a structured error: the synchronous runtime cannot wait for a
+promise to settle.
+
+It cannot call `run_code` from inside itself. Every call it makes is approved,
+hooked and observed as a direct one. `tools.parallel(calls, concurrency?)`
+runs **read-only** tools concurrently; writers run in order. A proxy that may
+dispatch a writer, such as `use_capability`, is refused rather than trusted
+read-only.
+
+`exclusive` (default `true`) hides every other tool from the **main model**, so
+all of its tool work goes through `run_code`; set it to `false` to keep the
+direct tools visible beside it. Sub-agents do not inherit `run_code`,
+`run_script` or the PTC contract, and keep their own surface either way.
 
 Limits for one program: the wall clock is 120s by default and is capped at 600s;
 `max_parallel` is 8 by default and is capped at 16; `max_calls` defaults to 100
@@ -520,7 +529,7 @@ A host-level read never borrows an unrelated pane's path.
 
 ```toml
 [remote]
-# idle_timeout_minutes = 10       # optional: exit a kernel after this long idle, -1..1440 minutes (0 = at once, -1 = never); WSL defaults to 10, an SSH host never unless set; hosts may override
+# idle_timeout_minutes = 10       # optional: exit a kernel after this long idle; -1 (never) or 1..1440 minutes (0 is refused); WSL defaults to 10, an SSH host never unless set; hosts may override
 [[remote.hosts]]
 name          = "gpu-box"
 host          = "203.0.113.7"
@@ -547,8 +556,10 @@ A WSL distribution on a Windows machine is a host with `kind = "wsl"` and a `dis
 - The kernel is kept alive deliberately, so a reconnect reuses it instead of paying for a cold start. It is not
   tied to the shell session Studio opens: closing the link leaves it serving.
   - It exits on its own after the kernel's idle timeout: 10 minutes by default. Set `idle_timeout_minutes` in
-    `[remote]` or on the host to change it (`-1..1440` minutes; `0` exits as soon as it is idle, `-1` never
-    exits). An SSH host has no idle exit unless one is set explicitly.
+    `[remote]` or on the host to change it: `-1` never exits, `1..1440` exits after that many idle minutes,
+    and `0` is refused. An SSH host has no idle exit unless one is set explicitly.
+  - A changed value takes effect on the next attach or pane reopen, which rebuilds or replaces the kernel; the
+    running kernel keeps the timeout it was launched with.
   - `reasonix remote stop <host>` stops it immediately.
   - Conversations are kept on disk and resume on the next connect.
 - Model credentials come from the distribution's own configuration (`provider = "remote"`): under WSL's default
@@ -559,6 +570,9 @@ A WSL distribution on a Windows machine is a host with `kind = "wsl"` and a `dis
   `remote connect` then work as they do for an SSH host.
   - `connect` keeps the session open until you press Ctrl-C; the kernel keeps running afterwards, until it idles
     out (10 minutes by default) or you run `reasonix remote stop`.
+  - A WSL `connect` accepts `--workspace` and `--open` only. `--no-serve`, `--forward-only` and `--local-port`
+    describe SSH tunnels, and are refused rather than ignored: a WSL connect starts or attaches the kernel in
+    the distribution, with no serve bootstrap and no local port to choose.
   - `status`, `forward`, `serve` and `fs` stay SSH-only and refuse a WSL machine with
     `remote: host is not reached over ssh`. `remote stop` is not SSH-only: it stops a WSL kernel too, without
     opening a session.
@@ -629,6 +643,17 @@ Set `serve_install` to `npm`, `upload` or `never` to take exactly one route.
 `reasonix remote test <name>` reports which routes are open on a host before
 you connect, and names what closes each one that is not.
 
+A host that already has an older `reasonix` is probed for the flags this line
+launches it with, including `--idle-timeout`.
+
+With `serve_install = "never"` the connect cannot replace that kernel, so it
+refuses with `remote.kernel_too_old` (the bootstrap's `KernelTooOldError`; some
+paths report it as `remote.install_disabled`) rather than start a kernel it
+cannot drive.
+
+Upgrade the remote's reasonix by hand, or let the host install one, then
+connect again.
+
 ### Model credentials
 
 A remote session resolves its models on **your** machine by default. The
@@ -656,20 +681,23 @@ switch it to `provider = "remote"`.
 
 In the desktop app, manage hosts under **Settings -> Remote SSH**, then use the
 status-bar chip or the host row's **Remote explorer** button to browse and edit
-files over SFTP, manage port forwards, and start/open the remote workspace.
-Opening a workspace creates a separate native Reasonix window, similar to a
-VS Code Remote SSH window. The primary window owns the SSH tunnel; the remote
-window is an isolated, lightweight shell and does not restore or acquire local
-conversation sessions. The remote window uses **this** machine's providers
-through the broker described above, so opening a workspace on a host that has
-never held an API key just works. On a host set to `provider = "remote"` the
-old path applies: the window shows the authenticated setup page first, saves
-the key only in the remote Reasonix credential file, and activates the Provider
-without restarting the remote Serve process. A transient SSH outage keeps the
-remote window open;
-the desktop reconnects in the background, re-attaches its loopback forward, and
-reloads the window against the recovered Serve. An authentication or host-key
-failure is terminal and closes the unusable remote window instead.
+files over SFTP, manage port forwards, and start/open the remote workspace. A
+workspace opens in a separate native Reasonix window, like VS Code Remote SSH.
+
+The primary window owns the SSH tunnel; the remote window is an isolated,
+lightweight shell and does not restore or acquire local conversation sessions.
+It uses **this** machine's providers through the broker above, so a workspace
+on a host without an API key just works.
+
+On a host set to `provider = "remote"` the old path applies: the window shows
+the authenticated setup page first, saves the key only in the remote Reasonix
+credential file, and activates the Provider without restarting the remote Serve
+process.
+
+A transient SSH outage keeps the remote window open; the desktop reconnects in
+the background, re-attaches its loopback forward, and reloads the window
+against the recovered Serve. An authentication or host-key failure is terminal
+and closes the unusable remote window instead.
 
 ### Lifetime of the remote serve
 
@@ -677,9 +705,11 @@ failure is terminal and closes the unusable remote window instead.
   quitting or losing the link does not terminate it, and the next connect
   attaches to it. An SSH kernel stays up until `reasonix remote stop <host>`
   (or `reasonix remote serve stop <host>`); setting `idle_timeout_minutes` in
-  `[remote]` or on the host (`-1..1440` minutes) makes it exit after that idle
-  window instead (`0` at once, `-1` never). A WSL kernel defaults to 10 minutes;
-  an SSH kernel never exits on idle unless the setting is explicit.
+  `[remote]` or on the host (`-1` never exits, `1..1440` exits after that many
+  idle minutes; `0` is refused) makes it exit after that idle window instead. A
+  changed value is applied by rebuilding or replacing the kernel on the next
+  attach. A WSL kernel defaults to 10 minutes; an SSH kernel never exits on idle
+  unless the setting is explicit.
 - A pane's session on that serve does not outlive the desktop. Each pane drives
   its own runtime there; closing the pane or quitting the desktop makes Studio
   call `POST /runtimes/{id}/close` on the remote serve before it takes the

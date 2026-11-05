@@ -193,12 +193,19 @@ tool_timeout_seconds = { "generate_video" = 1800 }   # 可选：raw MCP tool 名
 
 `[tools.ptc]` 是**仅用户配置文件**：项目里的 `reasonix.toml` 既不能开启它，也不能改它的上限。
 开启 `enabled = true` 后，模型可以写一段简短的同步 JavaScript 程序来调用其它工具；只有程序
-`log` 的内容和返回值会进入对话，因此多个有依赖的步骤只需一次往返。程序本身没有文件和网络
-访问，也不能导入模块；标准 JavaScript 内建对象可用，包括 `Date` 和 `Math`（真实时钟和随机数）。
-它是同步的——`await` 和 Promise 会被拒绝——程序内也不能再调用 `run_code`。程序里的每次调用
-都和直接调用一样经过审批、hook 和观测。`tools.parallel(calls, concurrency?)` 只并发执行
-**只读**工具；写工具请按顺序调用。`exclusive`（默认 `true`）会向模型隐藏其它所有工具，让所有
-工具工作都经过 `run_code`；设为 `false` 则保留旁边的直接工具。
+`log` 的内容和返回值会进入对话，因此多个有依赖的步骤只需一次往返。
+
+程序没有文件和网络访问，也不能导入模块。标准 JavaScript 内建对象可用，包括 `Date` 和 `Math`
+（真实时钟和随机数）。Promise 可用，其回调会在程序返回前执行；`await` 会以结构化错误被拒绝，
+因为同步运行时无法等待未完成的 Promise。
+
+程序内不能再调用 `run_code`。程序里的每次调用都和直接调用一样经过审批、hook 和观测。
+`tools.parallel(calls, concurrency?)` 只并发执行**只读**工具；写工具请按顺序调用。可能派发
+写者的代理（例如 `use_capability`）会被拒绝，而不是被当作只读。
+
+`exclusive`（默认 `true`）只向**主模型**隐藏其它所有工具，让它的工具工作都经过 `run_code`；
+设为 `false` 则保留旁边的直接工具。子代理不会继承 `run_code`、`run_script` 或 PTC contract，
+并保留自己的工具面。
 
 单个程序的上限：墙钟时间默认 120 秒，最多 600 秒；`max_parallel` 默认 8，最多 16；
 `max_calls` 默认 100 次宿主工具调用；程序源码和输出各 64KiB。这些字段设为 0 时保持默认值。
@@ -412,7 +419,7 @@ Studio 的主机级读取与未指定目录的打开，共用该主机显式配�
 
 ```toml
 [remote]
-# idle_timeout_minutes = 10       # 可选：内核空闲这么久后退出，-1..1440 分钟（0 = 立即，-1 = 永不）；WSL 默认 10 分钟，SSH 未显式配置时永不退出；单台主机可覆盖
+# idle_timeout_minutes = 10       # 可选：内核空闲这么久后退出；-1（永不）或 1..1440 分钟（0 会被拒绝）；WSL 默认 10 分钟，SSH 未显式配置时永不退出；单台主机可覆盖
 [[remote.hosts]]
 name          = "gpu-box"
 host          = "203.0.113.7"
@@ -439,8 +446,10 @@ Windows 电脑上的 WSL 发行版也是一台主机，写作 `kind = "wsl"` 加
 - 内核是被刻意保活的，重连时直接复用，而不是重新冷启动。它不依附于 Studio 打开的那个 shell 会话：
   关闭连接后它仍继续服务。
   - 它会按内核的空闲超时自行退出：默认 10 分钟。可在 `[remote]` 或单台主机上设置
-    `idle_timeout_minutes`（`-1..1440` 分钟；`0` 表示一空闲就退出，`-1` 表示永不退出）。
+    `idle_timeout_minutes`：`-1` 永不退出，`1..1440` 表示空闲这么多分钟后退出，`0` 会被拒绝。
     SSH 主机未显式配置时不会因空闲退出。
+  - 修改后的值在下次 Attach 或重新打开 pane 时生效，此时会重建或替换内核；正在运行的内核仍用
+    启动时的超时。
   - 用 `reasonix remote stop <主机>` 可立即停止。
   - 对话保存在磁盘上，下次连接时继续。
 - 模型凭据来自发行版自己的配置（`provider = "remote"`）：在 WSL 默认的网络模式下，发行版访问不到
@@ -451,6 +460,9 @@ Windows 电脑上的 WSL 发行版也是一台主机，写作 `kind = "wsl"` 加
   `remote connect` 的用法与 SSH 主机相同。
   - `connect` 会一直保持会话，直到你按 Ctrl-C；之后内核继续运行，直到空闲超时（默认 10 分钟）
     或你执行 `reasonix remote stop`。
+  - WSL 的 `connect` 只接受 `--workspace` 和 `--open`。`--no-serve`、`--forward-only` 和
+    `--local-port` 描述的是 SSH 隧道，会被拒绝而不是被忽略：WSL 连接只负责启动或接入发行版里的
+    内核，没有 serve 引导，也没有可选的本机端口。
   - `status`、`forward`、`serve` 和 `fs` 仍只支持 SSH，对 WSL 机器会以
     `remote: host is not reached over ssh` 拒绝。`remote stop` 不限于 SSH：它也能停止 WSL 内核，
     且不需要打开会话。
@@ -506,6 +518,13 @@ glibc —— 所以把它放过去是一次文件传输，不是安装。`serve_
 把 `serve_install` 设成 `npm` / `upload` / `never` 可以只走其中一条。连接前用
 `reasonix remote test <名字>` 可以看到哪些路是通的，不通的会说明被什么挡住了。
 
+远端已经装了较旧的 `reasonix` 时，探测会检查这一行启动内核所需的参数，包括 `--idle-timeout`。
+`serve_install = "never"` 时连接不能替换那个内核，于是会以 `remote.kernel_too_old`
+（bootstrap 的 `KernelTooOldError`；部分路径报作 `remote.install_disabled`）拒绝，而不是启动一个
+驱动不了的内核。
+
+请手动升级远端的 reasonix，或允许该主机自行安装，然后重新连接。
+
 ### 模型凭据
 
 远程会话默认在**你自己的机器**上解析模型。连接会带一条反向(`-R`)转发,通回本机回环上的
@@ -525,21 +544,25 @@ provider 就是刻意和你本机不同的场景。`reasonix remote serve start`
 
 在桌面端,于 **设置 -> 远程 SSH** 管理主机,再通过状态栏徽标或主机行的 **远程浏览器** 按钮经
 SFTP 浏览与编辑文件、管理端口转发、启动/打开远程工作区。打开工作区时会创建一个类似 VS Code
-Remote SSH 的独立 Reasonix 原生窗口。主窗口持有 SSH 隧道；远程窗口是隔离的轻量外壳，不会恢复
-或抢占本地对话会话。远程窗口通过上面说的 broker 使用**本机**的 Provider，所以在一台从没配过
-API Key 的主机上打开工作区可以直接用。设了 `provider = "remote"` 的主机走旧路径：窗口会先显示
-经过认证的配置页，只把 Key 保存到远端 Reasonix 凭据文件，并在不重启远端 Serve 的情况下激活
-Provider。
-短暂的 SSH 中断不会关闭远程窗口；桌面端会在后台重连、重新挂载回环转发，并让窗口重新加载已恢复的
-Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭已经不可用的远程窗口。
+Remote SSH 的独立 Reasonix 原生窗口。
+
+主窗口持有 SSH 隧道；远程窗口是隔离的轻量外壳，不会恢复或抢占本地对话会话。远程窗口通过上面
+说的 broker 使用**本机**的 Provider，所以在一台从没配过 API Key 的主机上打开工作区可以直接用。
+
+设了 `provider = "remote"` 的主机走旧路径：窗口会先显示经过认证的配置页，只把 Key 保存到远端
+Reasonix 凭据文件，并在不重启远端 Serve 的情况下激活 Provider。短暂的 SSH 中断不会关闭远程
+窗口；桌面端会在后台重连、重新挂载回环转发，并让窗口重新加载已恢复的 Serve。认证失败或主机密钥
+错误属于终止性故障，此时会关闭已经不可用的远程窗口。
 
 ### 远端 serve 的生命周期
 
 - 主机上的 `reasonix serve` 进程比桌面和链路活得久:退出桌面或断开链路都不会终止它,重连会
   直接接入。SSH 内核一直运行到执行 `reasonix remote stop <主机>`(或
   `reasonix remote serve stop <主机>`);若在 `[remote]` 或单台主机上设置了
-  `idle_timeout_minutes`(`-1..1440` 分钟),则改为空闲该时长后退出(`0` 立即,`-1` 永不)。
-  WSL 内核默认 10 分钟；SSH 内核未显式配置时不会因空闲退出。
+  `idle_timeout_minutes`（`-1` 永不退出，`1..1440` 在空闲该分钟数后退出；`0` 会被拒绝），
+  则改为空闲该时长后退出。WSL 内核默认 10 分钟；SSH 内核未显式配置时不会因空闲退出。
+- 修改 `idle_timeout_minutes` 后，新值在下次 Attach 或重新打开 pane 时生效：内核会被重建或替换，
+  正在运行的内核仍保留启动时的超时。
 - pane 在这个 serve 上的会话不会比桌面活得久。每个 pane 在远端各自驱动一个 runtime;关闭 pane
   或退出桌面时,Studio 会先向远端 serve 发 `POST /runtimes/{id}/close`,再拆隧道。
 - 这次关闭会取消进行中的回合并释放会话租约,别的窗口随后就能打开这个会话。被关闭的只有该 pane

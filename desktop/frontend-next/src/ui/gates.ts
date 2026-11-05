@@ -20,10 +20,12 @@ interface Inputs {
 // A duplicate answer to a decision the kernel already settled is success seen
 // from the losing side: another window or an earlier attempt got there first.
 // Reporting it as a failure would leave the person retrying a closed gate.
+// A normal answer's ask that is gone refuses with 409 surface.expired;
+// ask.not_found (404) is raised only by the engage request, which does not
+// travel through this helper.
 function alreadySettled(e: unknown): boolean {
-  if (!(e instanceof HttpError)) return false;
-  if (e.status === 409) return e.reason?.code === "plan.decision_stale" || e.reason?.code === "surface.expired";
-  return e.status === 404 && e.reason?.code === "ask.not_found";
+  if (!(e instanceof HttpError) || e.status !== 409) return false;
+  return e.reason?.code === "plan.decision_stale" || e.reason?.code === "surface.expired";
 }
 
 /** What a card sitting at a gate can answer with. Each of these settles one

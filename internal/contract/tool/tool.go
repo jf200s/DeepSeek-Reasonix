@@ -395,9 +395,12 @@ type Registry struct {
 	providerVisible map[string]bool
 	// providerExclusive pins providerVisible as a deliberate, closed surface:
 	// while set, ShowToProvider refuses additions and AddProviderVisibleTools
-	// does nothing. An explicit SetProviderVisibleTools replaces the surface
-	// the same way it replaces the names, and so clears the pin.
+	// does nothing. An explicit set replaces the surface and clears the pin.
 	providerExclusive bool
+	// providerSurfaceAuthoritative marks providerVisible as a declared,
+	// authoritative surface rather than an advisory default. An exclusive pin
+	// and the advisory setter both report false.
+	providerSurfaceAuthoritative bool
 	// admit, when non-nil, is the ceiling on what this registry may ever hold:
 	// Add refuses every tool it rejects, so no later registration path can widen it.
 	admit     func(Tool) bool
@@ -413,53 +416,6 @@ func NewRegistry() *Registry {
 		suspended:           map[string]bool{},
 		disabledMCP:         map[string]bool{},
 		disabledMCPByServer: map[string]map[string]bool{},
-	}
-}
-
-// SetProviderVisibleTools restricts the provider-visible schema surface to the
-// given names while keeping all registered tools executable via Get. Passing
-// nil clears the restriction. Names are normalized with strings.TrimSpace. An
-// explicit set is the caller's whole surface for the moment, so it also lifts a
-// pin left by SetProviderVisibleToolsExclusive.
-func (r *Registry) SetProviderVisibleTools(names []string) {
-	if r == nil {
-		return
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.providerExclusive = false
-	r.setProviderVisibleToolsLocked(names)
-}
-
-// setProviderVisibleToolsLocked replaces the restriction. Callers hold the
-// write lock.
-func (r *Registry) setProviderVisibleToolsLocked(names []string) {
-	if names == nil {
-		if r.providerVisible != nil {
-			r.providerVisible = nil
-			r.schemaRev.Add(1)
-		}
-		return
-	}
-	visible := make(map[string]bool, len(names))
-	for _, name := range names {
-		name = strings.TrimSpace(name)
-		if name != "" {
-			visible[name] = true
-		}
-	}
-	changed := len(visible) != len(r.providerVisible) || r.providerVisible == nil
-	if !changed {
-		for name := range visible {
-			if !r.providerVisible[name] {
-				changed = true
-				break
-			}
-		}
-	}
-	r.providerVisible = visible
-	if changed {
-		r.schemaRev.Add(1)
 	}
 }
 
