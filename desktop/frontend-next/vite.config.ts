@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import { pdfAssets } from "./tools/pdf-assets.ts";
@@ -64,6 +65,12 @@ export default defineConfig(({ mode }) => {
     },
     server: {
       port: 5273,
+      // A worktree's node_modules is often a symlink into the primary checkout.
+      // Serving its real path keeps Vite from rejecting assets that live there,
+      // such as the maplibre worker MapCanvas imports.
+      fs: {
+        allow: [".", realpathSync(new URL("./node_modules", import.meta.url))],
+      },
       // The dev server is cross-origin to serve, which its CSRF guard rejects.
       // Rewriting Origin makes the hop look same-origin, matching production
       // where the UI really is served from the kernel.

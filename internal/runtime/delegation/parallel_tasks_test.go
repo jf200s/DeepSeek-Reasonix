@@ -677,6 +677,9 @@ func TestCancelledTaskWithUnrecordedTerminalGivesNoReference(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("directory permissions do not stop writes here")
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permissions do not stop writes")
+	}
 	task, prov, dir := stoppedFixture(t)
 	base := agent.WithParentSession(agent.WithCallContext(context.Background(), "task-call", event.Discard, nil, false), "parent-session")
 	ctx, cancel := context.WithCancel(base)

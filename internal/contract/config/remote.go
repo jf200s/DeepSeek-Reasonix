@@ -243,11 +243,10 @@ const (
 )
 
 // IdleTimeout is how long this host's kernel may sit with no client connected
-// before it exits on its own. The entry's own value wins over the [remote]
-// default; with neither set a WSL distribution takes
-// DefaultRemoteIdleTimeoutMinutes and an SSH kernel never exits for idleness.
-// -1 means never (a negative duration), zero is refused by validation, and an
-// entry built in memory still maps zero to "exit once no client is connected".
+// before it exits. The entry's own value wins over the [remote] default; with
+// neither, WSL takes DefaultRemoteIdleTimeoutMinutes and SSH never exits. -1
+// means never (a negative duration), zero is refused by validation, and an
+// in-memory entry still maps zero to "exit once no client is connected".
 func (e RemoteHostEntry) IdleTimeout(global *int) time.Duration {
 	minutes := RemoteIdleTimeoutNever
 	if e.HostKind() == RemoteKindWSL {

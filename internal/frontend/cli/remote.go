@@ -158,9 +158,8 @@ func remoteAddCLI(args []string) int {
 	useSSHConfig := fs.Bool("use-ssh-config", false, "layer ~/.ssh/config values under unset fields")
 	serveInstall := fs.String("serve-install", "auto", "remote CLI install strategy: auto|npm|upload|never")
 	// The flag has no single default to advertise: an unconfigured SSH host is
-	// never idle-exited, while a WSL distribution exits after 10 minutes. Only a
-	// value given on the command line is recorded, so the flag default stays 0
-	// and the help text names both kinds' behaviour.
+	// never idle-exited, while WSL exits after 10 minutes. Only a value given on
+	// the command line is recorded, so the default stays 0.
 	idleTimeout := fs.Int("idle-timeout", 0, "minutes a kernel may sit idle before it exits (1..1440, -1 = never; default: WSL 10, SSH never)")
 	passphraseEnv := fs.String("passphrase-env", "", "env var name holding the key passphrase")
 	passwordEnv := fs.String("password-env", "", "env var name holding the login password")

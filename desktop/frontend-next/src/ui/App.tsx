@@ -24,6 +24,7 @@ import { noteFault } from "./fault";
 import { ToastStack } from "./ToastStack";
 import { useLinkRouting } from "./links";
 import { Pane, type PaneReport } from "./Pane";
+import { NO_REPORT } from "./appreport";
 import { clearDraftForSession } from "./drafts";
 import { DOCK, Gutter, RAIL, dockMax, keepWidth, widthOf } from "./Gutter";
 import { useWindowKeys, type Shortcut } from "./windowkeys";
@@ -82,23 +83,6 @@ const Settings = lazy(async () => {
   if (loaded.error) throw loaded.error;
   return { default: loaded.module!.Settings };
 });
-
-const NO_REPORT: PaneReport = {
-  status: null,
-  workspace: null,
-  title: "",
-  steer: 0,
-  run: "idle",
-  live: false,
-  cost: "",
-  contextPercent: null,
-  context: null,
-  mcp: [],
-  wallet: "",
-  view: "flow",
-  rows: 0,
-  surfaces: 0,
-};
 
 // App is the window around the panes, not a session itself: the workspace tree,
 // the chrome, the settings sheet and the theme are the window's, while every

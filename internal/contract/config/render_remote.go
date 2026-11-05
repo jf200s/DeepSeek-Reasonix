@@ -58,10 +58,9 @@ func renderRemoteSection(b *strings.Builder, r RemoteConfig) {
 			fmt.Fprintf(b, "workspaces = %s   # the other projects on this machine\n", renderStringArray(h.Workspaces))
 		}
 		if h.ServeInstall != "" {
-			// Write the strategy that will actually be used: a WSL host reads
-			// upload back as auto (the distribution cannot run this side's
-			// binary), so rendering the stored word would preserve a line that
-			// can never take effect.
+			// Write the strategy that will actually be used: WSL reads upload back as
+			// auto (the distribution cannot run this side's binary), so rendering the
+			// stored word would preserve a line that can never take effect.
 			fmt.Fprintf(b, "serve_install = %q   # auto|npm|upload|never (wsl hosts cannot upload)\n", h.ServeInstallMode())
 		}
 		if h.UseSSHConfig {

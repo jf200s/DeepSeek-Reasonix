@@ -198,9 +198,8 @@ var table = []Entry{
 	{ID: "tools.mcp_load", Class: Guarded, Effect: OnOpen},
 	{ID: "tools.ptc.enabled", Class: Guarded, Effect: OnOpen},
 	// exclusive only chooses which tools the model sees, so it is a Preference.
-	// The program's resource caps are the user's: a model that could propose
-	// raising its own call, time or output budget would be widening a limit
-	// that exists to bound it, so those are Guarded like the other caps.
+	// Resource caps are the user's: a model proposing a larger call, time or
+	// output budget would widen a limit that exists to bound it, so those are Guarded.
 	{ID: "tools.ptc.exclusive", Class: Preference, Effect: OnOpen},
 	{ID: "tools.ptc.timeout_seconds", Class: Guarded, Effect: OnOpen},
 	{ID: "tools.ptc.max_calls", Class: Guarded, Effect: OnOpen},

@@ -26,15 +26,11 @@ func Load() (*Config, error) {
 	return LoadForRoot(".")
 }
 
-// LoadForRoot builds the configuration with project files resolved from root
-// instead of the current working directory. When root is "" or ".", it behaves
-// like Load(). This is the workspace-aware entry point: desktop tabs use it so
-// each project's reasonix.toml + .mcp.json are resolved independently without
-// changing the process cwd, while provider keys stay rooted in Reasonix home.
-//
-// Note: LoadForRoot may rewrite legacy MCP `tier` lines on disk (see
-// mergeRuntimeTOMLFileSnapshot). Callers that must not mutate config files should use
-// LoadForRootReadOnly instead.
+// LoadForRoot resolves project files from root instead of the cwd; "" and "."
+// behave like Load(). Desktop tabs use it so each project's reasonix.toml and
+// .mcp.json load independently without changing the process cwd. It may rewrite
+// legacy MCP `tier` lines on disk; use LoadForRootReadOnly when that is not
+// allowed.
 func LoadForRoot(root string) (*Config, error) { return processRoots().LoadForRoot(root) }
 
 // defaultConfig is Default() bound to this binding, so a path derived from the
@@ -105,9 +101,8 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 		tomlSources = append(tomlSources, uc)
 		meta, err := mergeTOML(cfg, uc)
 		if err != nil {
-			// Never rewrite the broken original file. Prefer the last verified
-			// snapshot in memory, then built-in defaults, and keep loading so
-			// the rest of the app stays usable.
+			// Never rewrite the broken original file. Fall back to the last
+			// verified snapshot in memory, then built-in defaults, and keep loading.
 			lkgCfg := r.defaultConfig()
 			lkgCfg.setExpansionEnv(expansionEnv)
 			lkgCfg.CredentialsStore = r.credentialsStoreMode()
@@ -130,21 +125,15 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 			}
 		}
 	}
-	// A last-known-good recovery is still trusted user configuration even though
-	// the broken source file cannot provide usable TOML metadata.
+	// A last-known-good recovery is still trusted user configuration.
 	if cfg.systemPromptFileSource == promptFileSourceUnknown && cfg.Agent.SystemPromptFile != "" {
 		cfg.systemPromptFileSource = promptFileSourceUser
 	}
-	// The global [remote] idle timeout is user-only, so there is no narrower
-	// project value to fall back to: a value outside what a kernel can honour
-	// is a user-file error, reported here with the setting named rather than
-	// carried into a duration on the next connect.
+	// The global [remote] idle timeout is user-only; a value out of range is an error.
 	if err := validateRemoteIdleTimeout("", cfg.Remote.IdleTimeoutMinutes); err != nil {
 		return nil, err
 	}
-	// Per-host overrides came from the same user file, so they are held to the
-	// same range: a bad value is refused with the host it belongs to instead of
-	// being carried onto a later connect.
+	// Per-host overrides from the same user file share that range.
 	if err := validateRemoteHostIdleTimeouts(cfg.Remote.Hosts); err != nil {
 		return nil, err
 	}
@@ -161,10 +150,8 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 			))
 		}
 	}
-	// TOML decoding replaces [[plugins]] wholesale, so cfg.Plugins now holds
-	// only the last file's. Re-merge by name across all sources (later wins) so a
-	// project reasonix.toml doesn't drop the global config's MCP servers.
-	// mergeTOMLPlugins only reads files; it does not run on-disk migrations.
+	// TOML decoding replaces [[plugins]] wholesale; re-merge by name across all
+	// sources (later wins) so a project file cannot drop global MCP servers.
 	plugins, err := mergeTOMLPlugins(tomlSources)
 	if err != nil {
 		cfg.addLoadWarning(fmt.Sprintf("plugin configuration could not be merged (%v); continuing without those entries", err))
@@ -188,10 +175,8 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 		held.narrow(cfg, r, root, projectMeta)
 	}
 
-	// Claude Code's .mcp.json (project root) is read last and merged into
-	// [[plugins]], so a server configured for Claude works here unchanged.
-	// Project reasonix.toml wins on a name collision; project .mcp.json wins
-	// over a same-name user-global entry (see mergeMCPJSON).
+	// Claude Code's .mcp.json (project root) is merged last into [[plugins]], so
+	// a server configured for Claude works here; project .mcp.json beats a user entry.
 	if withProject {
 		mcpFile := mcpJSONFile
 		if root != "." {
@@ -205,10 +190,8 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 		cfg.mergeMCPJSON(append(entries, loadClaudeMCP(r.claudeConfigPath(), root)...))
 	}
 
-	// Lowest priority before the one-time v1.9.1 MCP migration: the v0.x
-	// ~/.reasonix/config.json's mcpServers. Once the migration marker exists, the
-	// current config is authoritative even when it is empty; reading the legacy
-	// source again would resurrect servers the user removed from current config.
+	// Lowest priority before the one-time v1.9.1 MCP migration: the v0.x config.json's
+	// mcpServers. Once migrated, the current config is authoritative even when empty.
 	if !r.mcpGlobalMigrationComplete() {
 		cfg.mergeMCPJSON(loadLegacyMCP(r.legacyConfigPath()))
 	}
@@ -264,19 +247,13 @@ func cloneStringMap(in map[string]string) map[string]string {
 }
 
 // restoreUnresolvableProjectDefaultModel falls back to the user/global
-// default_model when a project reasonix.toml overrides it with a reference no
-// configured provider serves (#4218). Pre-v1.11 persistence paths (e.g. the
-// "always allow" writer) full-rendered ./reasonix.toml and pinned the built-in
-// default_model ("deepseek-flash") into it; once the user's [[providers]]
-// replaced the built-in presets, that stale name resolved to nothing and boot
-// hard-failed in every launch from that folder. In-memory only — the project
-// file is untouched, and a project override that does resolve still wins. The
-// ignored value is kept so boot can surface a notice.
+// default_model when a project file names one no configured provider serves
+// (#4218). It is in-memory only: the project file is untouched, and a project
+// override that does resolve still wins.
 //
-// Callers must only invoke this when the user config explicitly defines
-// default_model: falling back to the built-in default would silently mask a
-// broken ref when the project file is the user's only config, and that case
-// must keep the actionable boot error (TestBuildUnknownModelErrorIsActionable).
+// Callers must only invoke this with an explicit user default_model; falling
+// back to the built-in default would mask a broken project-only config and
+// hide the actionable boot error (TestBuildUnknownModelErrorIsActionable).
 func restoreUnresolvableProjectDefaultModel(c *Config, userDefault string) {
 	if c == nil {
 		return

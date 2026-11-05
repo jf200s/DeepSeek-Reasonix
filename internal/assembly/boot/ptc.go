@@ -23,32 +23,24 @@ func (b *builder) ptcRunCodeExcludedByUser() bool {
 	return slices.Contains(b.cfg.UserDisabledTools(), runcode.Name)
 }
 
-// attachPTC offers run_code when [tools.ptc] asks for it. It registers the tool
-// and puts the tool contract in the system prompt, both of which must exist
-// before the executor is built. The provider-visible surface is narrowed later,
-// by narrowPTC: controller() re-derives that surface from the preset at its very
-// end, so a narrowing done here would be overwritten.
-//
-// A registry that refuses run_code because the active composition or the
-// read-only posture excludes it simply runs without PTC: the feature was not
-// available in this session, so the build proceeds and nothing advertises a
-// program tool that is not there. Only the user's own disabled list is an
-// explicit instruction to refuse.
+// attachPTC offers run_code when [tools.ptc] asks for it, registering the tool
+// and its system-prompt contract before the executor is built. The visible
+// surface is narrowed later by narrowPTC, because controller() re-derives it
+// from the preset at its end. A registry that excludes run_code (composition,
+// read-only posture) simply runs without PTC; only the user's disabled list refuses.
 func (b *builder) attachPTC() error {
-	// A reused system prompt may already carry a contract from the build it was
-	// taken from (model switch, provider-only rebuild, resumed composition).
-	// Strip it first: appending to it would grow a copy per build, and a reused
-	// prompt must not keep advertising a tool this build does not offer.
+	// A reused prompt may carry a contract from the build it came from (model
+	// switch, provider rebuild, resumed composition). Strip it first, so appending
+	// does not grow a copy per build or advertise a tool this build does not offer.
 	b.prompt.prompt = stripPTCContract(b.prompt.prompt)
 
 	cfg := b.cfg.Tools.PTC
 	if !cfg.Enabled || b.tools.reg == nil {
 		return nil
 	}
-	// A disabled run_code makes PTC impossible before the registry is even
-	// asked: the merged list includes a project's removal, and DisableTools
-	// would drop the tool later, after the contract had been written. Only the
-	// user's own list is an explicit contradiction worth failing the build.
+	// A disabled run_code makes PTC impossible before the registry is asked: the
+	// merged list includes project removals and DisableTools drops it later. Only
+	// the user's own list is an explicit contradiction worth failing the build.
 	if slices.Contains(b.cfg.DisabledTools(), runcode.Name) {
 		if b.ptcRunCodeExcludedByUser() {
 			return ptcRunCodeDisabled()
@@ -86,12 +78,10 @@ func (b *builder) attachPTC() error {
 	return nil
 }
 
-// narrowPTC runs after controller(), which is the last place the unified preset
-// surface is applied and where the disabled-tool list takes effect. It makes
-// run_code visible again where the unified surface would have hidden it, and
-// the only visible tool when exclusive mode is on. A session where run_code was
-// never admitted (composition selection, read-only posture) skips narrowing; an
-// explicit [tools].disabled entry is refused instead.
+// narrowPTC runs after controller(), the last place the unified preset surface
+// is applied, and makes run_code visible again where that surface hid it (the
+// only tool in exclusive mode). A session that never admitted run_code skips
+// narrowing; an explicit [tools].disabled entry is refused instead.
 func (b *builder) narrowPTC() error {
 	cfg := b.cfg.Tools.PTC
 	if !cfg.Enabled || b.tools.reg == nil {
@@ -112,18 +102,17 @@ func (b *builder) narrowPTC() error {
 }
 
 // planSafeRunCode declares run_code admissible during Plan mode. Exclusive
-// mode leaves it as the model's only tool, and its nested calls are phase-
-// checked one by one, so a writer inside the program is still refused.
+// mode leaves it the model's only tool, and its nested calls are phase-checked
+// one by one, so a writer inside the program is still refused.
 type planSafeRunCode struct{ tool.Tool }
 
 func (planSafeRunCode) PlanModeSafe() bool { return true }
 
 // ptcTools collects what a program may call: every registered tool except
-// run_code itself and run_script, whose nested calls are refused anyway.
-// Advertising a tool a program can never call would only invite the model to
-// try it, so the user's disabled names are skipped as well. MCP tools follow
-// the provider surface: only those of an always-loaded, authorized server are
-// named, so PTC does not quietly show a deferred server's schema.
+// run_code and run_script, whose nested calls are refused anyway. Advertising
+// a tool a program can never call would invite the model to try it, so the
+// user's disabled names are skipped. MCP tools follow the provider surface:
+// only an always-loaded, authorized server's tools are named.
 func ptcTools(reg *tool.Registry, disabled, mcpVisible []string) []ptc.Tool {
 	mcp := make(map[string]bool, len(mcpVisible))
 	for _, name := range mcpVisible {

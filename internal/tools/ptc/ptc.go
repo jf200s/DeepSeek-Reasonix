@@ -1,13 +1,11 @@
 // Package ptc implements programmatic tool calling: the model writes a short
-// JavaScript program that calls tools, loops over their results and logs what
-// it needs, so several dependent steps cost one round trip and only the log
-// output and return value enter the conversation.
+// JavaScript program that calls tools and logs what it needs, so dependent
+// steps cost one round trip and only the log output and return value persist.
 //
-// Every call inside a program goes through the agent's own invoker, so it is
-// approved, hooked and observed exactly as if the model had made it. The
-// program itself reaches nothing outside: no files, no network and no modules,
-// only the tool bindings, log/console.log and the standard JavaScript built-ins
-// (Date and Math included, so a real clock and random numbers are available).
+// Every call goes through the agent's own invoker, so it is approved, hooked
+// and observed as if the model had made it. Programs reach nothing else: no
+// files, no network and no modules, only the tool bindings and standard
+// JavaScript built-ins.
 package ptc
 
 import (
@@ -332,10 +330,9 @@ func (r *programRun) exec(program string) (goja.Value, error) {
 	case out := <-done:
 		return out.val, out.err
 	case <-r.ctx.Done():
-		// The derived context is the program's own timer, but it also ends when
-		// the caller's context does. Only an expiry that happened while the
-		// parent was still live is the program's own timeout; a parent deadline
-		// that fired first is a cancellation of the whole run.
+		// The derived context is the program's timer but also ends with the caller's.
+		// Only an expiry while the parent was live is the program's own timeout; a
+		// parent deadline that fired first cancels the whole run.
 		timedOut := errors.Is(r.ctx.Err(), context.DeadlineExceeded) && r.parent.Err() == nil
 		interrupt := "the run was cancelled"
 		reason := interrupt

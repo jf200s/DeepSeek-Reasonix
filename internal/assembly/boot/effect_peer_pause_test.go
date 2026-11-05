@@ -34,6 +34,9 @@ func TestEffectPeerMessageAgainstAPausedQueue(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.pause+" pause, "+tc.consent, func(t *testing.T) {
+			if tc.pause != "user" && os.Geteuid() == 0 {
+				t.Skip("running as root: chmod 000 does not pause the host queue")
+			}
 			rec, peersDir, ctrl, held := buildPeerSession(t, true)
 			home := filepath.Dir(peersDir)
 			t.Setenv("REASONIX_HOME", home)

@@ -3105,6 +3105,9 @@ func makeDirReadOnly(dir string) (func(), error) {
 }
 
 func TestSaveToUnwritableUserSymlinkTargetPreservesLink(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: directory permission bits do not deny writes")
+	}
 	home := testenv.TempDir(t)
 	targetDir := filepath.Join(testenv.TempDir(t), "readonly")
 	t.Setenv("REASONIX_HOME", home)

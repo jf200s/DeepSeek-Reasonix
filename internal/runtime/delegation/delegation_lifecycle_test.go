@@ -432,6 +432,9 @@ func TestAStoreThatCannotRecordAnExecutionStopsIt(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("a read-only directory does not refuse writes on Windows")
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: a read-only directory does not refuse writes")
+	}
 	t.Run("lone delegation", func(t *testing.T) {
 		task, ctx, sessionPath, sink, prov := refusingStoreFixture(t, loneNodeID, 1)
 		if _, err := task.RunProfileSpec(ctx, ProfileExecSpec{

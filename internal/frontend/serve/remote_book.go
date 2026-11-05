@@ -89,10 +89,9 @@ func (h *Hub) saveRemoteHost(w http.ResponseWriter, r *http.Request) {
 		entry.Host = name
 	}
 	err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
-		// Editing an entry must not drop the forwards it carries: they are set
-		// from the CLI and have no control on this page to put them back. The
-		// idle timeout is the same story: the form does not show it, so a save
-		// leaves the row's own setting alone.
+		// Editing an entry must not drop the forwards it carries: they are set from
+		// the CLI and have no control on this page to put them back. The idle
+		// timeout is the same story: the form does not show it, so a save leaves it alone.
 		if existing, ok := c.RemoteHost(name); ok {
 			if existing.HostKind() != config.RemoteKindSSH || strings.TrimSpace(body.Distro) != "" {
 				return nil, errRemoteKind

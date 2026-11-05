@@ -81,6 +81,9 @@ func TestVetExtraRootRefusesWhatHoldsKeysOrTheSystem(t *testing.T) {
 	}
 	if runtime.GOOS != "windows" {
 		t.Run("system dir", func(t *testing.T) {
+			if os.Geteuid() == 0 {
+				t.Skip("running as root: /etc is owned by the current user")
+			}
 			if got := refusalOf(t, cfg, primary, "/etc"); got != RootNotOwned {
 				t.Fatalf("refusal = %s", got)
 			}

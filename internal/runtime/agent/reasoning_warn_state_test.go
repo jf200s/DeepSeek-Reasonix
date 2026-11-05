@@ -350,6 +350,9 @@ func TestMissingReasoningWarnStateReadFailureDoesNotOverwriteExistingIncidents(t
 	if runtime.GOOS == "windows" {
 		t.Skip("chmod permissions are not portable to Windows")
 	}
+	if os.Geteuid() == 0 {
+		t.Skip("running as root: chmod 000 does not deny reads")
+	}
 	dir := testenv.TempDir(t)
 	path := filepath.Join(dir, missingReasoningWarnStateFilename)
 	s := newMissingReasoningWarnState(dir)

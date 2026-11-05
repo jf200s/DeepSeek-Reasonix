@@ -214,13 +214,11 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("auto_submit", fmt.Sprintf("%t", c.AutoSubmit), ProjectUserOnly)
 		c.AutoSubmit = h.autoSubmit
 	}
-	// Messages between sessions put other sessions' text in front of this one's
-	// model, so enabling them is the user's alone.
+	// Messages between sessions put other sessions' text before this one's model.
 	h.narrowPeers(c)
 	h.narrowObservability(c)
 	h.narrowMods(c)
-	// Letting the model read what a server publishes widens what a third party
-	// can put in front of it, so a cloned repo must not turn it on.
+	// Letting the model read what a server publishes widens what a third party can show it.
 	if c.Tools.MCPResources != h.mcpResources {
 		c.ignoreProject("tools.mcp_resources", fmt.Sprintf("%t", c.Tools.MCPResources), ProjectUserOnly)
 		c.Tools.MCPResources = h.mcpResources
@@ -239,8 +237,7 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("tools.video_native_max_bytes", fmt.Sprint(c.Tools.VideoNativeMaxBytes), ProjectUserOnly)
 		c.Tools.VideoNativeMaxBytes = h.videoNativeMax
 	}
-	// The cross-session write lease protects other sessions from this one, so a
-	// cloned repo must not relax it, nor tighten what the user chose.
+	// The cross-session write lease protects other sessions, so a clone cannot relax it.
 	if c.Agent.GoalAutoRetry != h.goalAutoRetry {
 		c.ignoreProject("agent.goal_auto_retry", fmt.Sprint(c.Agent.GoalAutoRetry), ProjectUserOnly)
 		c.Agent.GoalAutoRetry = h.goalAutoRetry
