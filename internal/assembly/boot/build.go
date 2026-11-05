@@ -151,6 +151,9 @@ func (b *builder) build(ctx context.Context, opts Options) (*BuildResult, error)
 	if err := b.wireTools(); err != nil {
 		return nil, err
 	}
+	if err := b.attachPTC(); err != nil {
+		return nil, err
+	}
 	if err := b.bindCompositionMCPContracts(ctx); err != nil {
 		return nil, err
 	}
@@ -158,7 +161,11 @@ func (b *builder) build(ctx context.Context, opts Options) (*BuildResult, error)
 	if err != nil {
 		return nil, err
 	}
+	// The controller exists: from here on a failure must release it.
 	constructed = ctrl
+	if err := b.narrowPTC(); err != nil {
+		return nil, err
+	}
 	b.tools.candidates.bind(ctrl)
 	b.tools.isolation.bind(ctrl)
 	res, err := b.freeze(ctrl)

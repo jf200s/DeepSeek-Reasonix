@@ -54,6 +54,10 @@ type heldScope struct {
 	// mcpResources decides whether a server's resources are readable by the model.
 	mcpResources bool
 	presentFiles bool
+	// ptc decides whether the model may run a program that calls tools. A
+	// cloned repo must not be able to turn that on or widen its limits: the
+	// program can reach every tool the session already has.
+	ptc PTCConfig
 	// webSearchBackends and searxngURL decide where the user's queries go, so
 	// only the user file names them.
 	webSearchBackends []string
@@ -109,6 +113,9 @@ func holdUserScope(c *Config) heldScope {
 		mods:            c.Mods,
 		mcpResources:    c.Tools.MCPResources,
 		presentFiles:    c.Tools.PresentFiles,
+		// The project decode writes through a non-nil PTCConfig pointer field,
+		// so the held grant must not share them with the live config.
+		ptc: clonePTCConfig(c.Tools.PTC),
 
 		webSearchBackends: slices.Clone(c.Tools.WebSearchBackends),
 		searxngURL:        c.Tools.SearxngURL,
@@ -222,6 +229,7 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.ignoreProject("tools.present_files", fmt.Sprintf("%t", c.Tools.PresentFiles), ProjectUserOnly)
 		c.Tools.PresentFiles = h.presentFiles
 	}
+	h.narrowPTC(c)
 	c.keepUserSearchBackends(h)
 	if c.Tools.VideoURLPassthrough != h.videoURLPass {
 		c.ignoreProject("tools.video_url_passthrough", fmt.Sprintf("%t", c.Tools.VideoURLPassthrough), ProjectUserOnly)
@@ -239,6 +247,8 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 	}
 	h.narrowAgentLimits(c)
 	// A project can remove tools for its own sessions and never take one back.
+	c.userDisabledTools = slices.Clone(h.toolsDisabled)
+	c.userDisabledSet = true
 	c.Tools.Disabled = append(slices.Clone(h.toolsDisabled), c.Tools.Disabled...)
 	c.Tools.Disabled = c.DisabledTools()
 	if c.Agent.PlanApproval != h.planApproval {
@@ -310,6 +320,16 @@ func (h heldScope) narrow(c *Config, r Roots, root string, projectMeta toml.Meta
 		c.Tools.Shell.Args = nil
 	}
 	h.endpoints.gateEndpoints(c, store, ws)
+}
+
+// narrowPTC resets the program surface to the user's choice: a program written
+// by the model can call every tool the session has, so a cloned repo must not
+// hand itself a scripting surface.
+func (h heldScope) narrowPTC(c *Config) {
+	if !reflect.DeepEqual(c.Tools.PTC, h.ptc) {
+		c.ignoreProject("tools.ptc", describePTCConfig(c.Tools.PTC), ProjectUserOnly)
+	}
+	c.Tools.PTC = clonePTCConfig(h.ptc)
 }
 
 // applyWorkspaceGrants adds what the user already granted this workspace, and

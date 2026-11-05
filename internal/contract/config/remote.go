@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // RemoteConfig is the [remote] section: SSH hosts the remote module may
@@ -15,8 +16,12 @@ import (
 // hosts, jump chains, or forwards.
 type RemoteConfig struct {
 	// ImportSSHConfig surfaces ~/.ssh/config aliases in `reasonix remote import`.
-	ImportSSHConfig bool              `toml:"import_ssh_config"`
-	Hosts           []RemoteHostEntry `toml:"hosts"`
+	ImportSSHConfig bool `toml:"import_ssh_config"`
+	// IdleTimeoutMinutes is how long a kernel on any host may sit with no
+	// client before it exits on its own. A host's own field overrides it; nil
+	// leaves each host on its kind's default. See RemoteHostEntry.IdleTimeout.
+	IdleTimeoutMinutes *int              `toml:"idle_timeout_minutes,omitempty"`
+	Hosts              []RemoteHostEntry `toml:"hosts"`
 }
 
 // RemoteHostEntry describes one SSH target. Secrets follow the provider
@@ -49,6 +54,9 @@ type RemoteHostEntry struct {
 	// dialed. Written as "disabled" rather than "enabled" so an entry written
 	// before the field existed still means what it always did.
 	Disabled bool `toml:"disabled"`
+	// IdleTimeoutMinutes overrides [remote] idle_timeout_minutes for this host.
+	// Read it through IdleTimeout rather than directly.
+	IdleTimeoutMinutes *int `toml:"idle_timeout_minutes,omitempty"`
 }
 
 // IsEnabled reports whether this machine may be dialed. The zero value is on.
@@ -84,11 +92,19 @@ const RemoteProviderRemote = "remote"
 // global entries.
 func (r RemoteConfig) Clone() RemoteConfig {
 	out := r
+	if r.IdleTimeoutMinutes != nil {
+		v := *r.IdleTimeoutMinutes
+		out.IdleTimeoutMinutes = &v
+	}
 	if r.Hosts != nil {
 		out.Hosts = make([]RemoteHostEntry, len(r.Hosts))
 		for i, h := range r.Hosts {
 			h.Forwards = append([]RemoteForwardEntry(nil), h.Forwards...)
 			h.Workspaces = append([]string(nil), h.Workspaces...)
+			if h.IdleTimeoutMinutes != nil {
+				v := *h.IdleTimeoutMinutes
+				h.IdleTimeoutMinutes = &v
+			}
 			out.Hosts[i] = h
 		}
 	}
@@ -129,9 +145,16 @@ func (e RemoteHostEntry) Target() string {
 }
 
 // ServeInstallMode returns the normalized install strategy, defaulting to auto.
+// A WSL distribution cannot take upload: what this side would send is a binary
+// built for this side's platform, and the distribution is Linux behind a
+// Windows shell, so the route can only fail. An entry that still names it —
+// hand-edited, or written by an older form — reads as auto.
 func (e RemoteHostEntry) ServeInstallMode() string {
 	m := strings.ToLower(strings.TrimSpace(e.ServeInstall))
 	if m == "" {
+		return "auto"
+	}
+	if e.HostKind() == RemoteKindWSL && m == "upload" {
 		return "auto"
 	}
 	return m
@@ -205,6 +228,80 @@ func (e RemoteHostEntry) PortOrDefault() int {
 	return 22
 }
 
+// Idle timeout bounds, in minutes. A kernel kept alive for reconnect is
+// supposed to leave on its own; these are the values a person may write.
+const (
+	// DefaultRemoteIdleTimeoutMinutes is the idle exit a WSL distribution uses
+	// when neither the host nor [remote] names one: long enough for a reconnect
+	// after a closed tab, short enough not to hold a machine all day. An SSH
+	// host keeps its long-standing stay-resident behaviour instead.
+	DefaultRemoteIdleTimeoutMinutes = 10
+	// RemoteIdleTimeoutNever disables the idle exit entirely.
+	RemoteIdleTimeoutNever = -1
+	// MaxRemoteIdleTimeoutMinutes bounds the idle timeout at one day.
+	MaxRemoteIdleTimeoutMinutes = 24 * 60
+)
+
+// IdleTimeout is how long this host's kernel may sit with no client connected
+// before it exits on its own. The entry's own value wins over the [remote]
+// default. With neither set, the host kind decides: a WSL distribution is kept
+// for reconnects and leaves after DefaultRemoteIdleTimeoutMinutes, while an SSH
+// kernel keeps its long-standing stay-resident behaviour and is never exited
+// for idleness. Zero exits as soon as the kernel is idle; -1
+// (RemoteIdleTimeoutNever) means never, and is reported as a negative duration
+// so a caller can pass it through unchanged.
+func (e RemoteHostEntry) IdleTimeout(global *int) time.Duration {
+	minutes := RemoteIdleTimeoutNever
+	if e.HostKind() == RemoteKindWSL {
+		minutes = DefaultRemoteIdleTimeoutMinutes
+	}
+	if global != nil {
+		minutes = *global
+	}
+	if e.IdleTimeoutMinutes != nil {
+		minutes = *e.IdleTimeoutMinutes
+	}
+	if minutes < 0 {
+		return -time.Minute
+	}
+	return time.Duration(minutes) * time.Minute
+}
+
+// validateRemoteIdleTimeoutMinutes is the one rule for an idle timeout, applied
+// to the user-global [remote] value and to each host's override.
+func validateRemoteIdleTimeoutMinutes(minutes int) error {
+	if minutes < RemoteIdleTimeoutNever || minutes > MaxRemoteIdleTimeoutMinutes {
+		return fmt.Errorf("idle_timeout_minutes %d out of range -1..%d", minutes, MaxRemoteIdleTimeoutMinutes)
+	}
+	return nil
+}
+
+func validateRemoteIdleTimeout(name string, minutes *int) error {
+	if minutes == nil {
+		return nil
+	}
+	if err := validateRemoteIdleTimeoutMinutes(*minutes); err != nil {
+		if name == "" {
+			return fmt.Errorf("[remote]: %w", err)
+		}
+		return fmt.Errorf("remote host %q: %w", name, err)
+	}
+	return nil
+}
+
+// validateRemoteHostIdleTimeouts applies the idle timeout rule to every host in
+// a book. A file written by hand or by another version can carry a per-host
+// override outside the range a kernel honours, and loading is the last place
+// that can name the host it came from.
+func validateRemoteHostIdleTimeouts(hosts []RemoteHostEntry) error {
+	for _, h := range hosts {
+		if err := validateRemoteIdleTimeout(h.Name, h.IdleTimeoutMinutes); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func validateRemoteHost(e RemoteHostEntry) error {
 	if strings.TrimSpace(e.Name) == "" {
 		return fmt.Errorf("remote host: name is required")
@@ -234,6 +331,9 @@ func validateRemoteHost(e RemoteHostEntry) error {
 	case "auto", "npm", "upload", "never":
 	default:
 		return fmt.Errorf("remote host %q: serve_install must be one of auto|npm|upload|never", e.Name)
+	}
+	if err := validateRemoteIdleTimeout(e.Name, e.IdleTimeoutMinutes); err != nil {
+		return err
 	}
 	seenBinds := map[string]bool{}
 	for _, f := range e.Forwards {

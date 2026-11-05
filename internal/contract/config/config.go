@@ -67,10 +67,15 @@ type Config struct {
 	shadowedProjectProviders   []ProviderEntry
 	ignoredProjectDefaultModel string
 	ignoredLegacyStepLimits    bool
-	expansionEnv               map[string]string
-	pluginPackageOwners        map[string]string
-	pluginPackageSkillOwners   map[string][]string
-	pluginPackageAgentOwners   map[string][]string
+	// userDisabledTools is [tools].disabled as the user's own file left it,
+	// before a project's list was appended. A project can remove a tool for its
+	// sessions; that is not the user asking for a feature to be off.
+	userDisabledTools        []string
+	userDisabledSet          bool
+	expansionEnv             map[string]string
+	pluginPackageOwners      map[string]string
+	pluginPackageSkillOwners map[string][]string
+	pluginPackageAgentOwners map[string][]string
 	// explicitProjectSkillKeys records project-level skill fields that the
 	// settings UI intentionally owns even when their value equals the built-in
 	// default. It is transient edit metadata and is never serialized directly.
@@ -1226,6 +1231,10 @@ type ToolsConfig struct {
 	// MCPLoad maps a server name to "always" or "deferred", overriding what
 	// the server's own declaration says.
 	MCPLoad map[string]string `toml:"mcp_load"`
+	// PTC offers run_code: the model writes one short JavaScript program whose
+	// tool calls each pass the ordinary checks, so dependent steps cost one
+	// round trip and only the program's output enters the conversation.
+	PTC PTCConfig `toml:"ptc"`
 }
 
 const (

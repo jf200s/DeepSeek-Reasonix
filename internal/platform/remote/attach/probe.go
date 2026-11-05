@@ -39,12 +39,13 @@ func (p *Pool) Probe(ctx context.Context, host string) (bootstrap.Report, error)
 	// The same options serve would install under. A probe reporting a route
 	// that attach would not take is worse than no probe.
 	return bootstrap.Probe(ctx, l.client, bootstrap.Options{
-		Install:        install,
-		LocalBinary:    p.opts.LocalBinary,
-		LocalGOOS:      runtime.GOOS,
-		LocalGOARCH:    runtime.GOARCH,
-		ProductVersion: p.opts.Version,
-		FetchBinary:    p.opts.FetchBinary,
-		MinVersion:     bootstrap.PaneFloor(p.brokers(l)),
+		Install:         install,
+		LocalBinary:     p.opts.LocalBinary,
+		LocalGOOS:       runtime.GOOS,
+		LocalGOARCH:     runtime.GOARCH,
+		ProductVersion:  p.opts.Version,
+		FetchBinary:     p.opts.FetchBinary,
+		ResolveDownload: p.opts.ResolveDownload,
+		MinVersion:      bootstrap.PaneFloor(p.brokers(l)),
 	})
 }

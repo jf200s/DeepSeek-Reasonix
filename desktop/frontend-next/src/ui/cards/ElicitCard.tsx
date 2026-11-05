@@ -5,10 +5,11 @@ import type { Item } from "../../state/session";
 import { answerSource } from "../source";
 import { useViewer } from "../../state/viewer";
 import { ElicitURLCard } from "./ElicitURLCard";
+import type { GateOutcome } from "../gates";
 
 export interface ElicitProps {
   item: Extract<Item, { t: "ask" }>;
-  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[] }[]) => Promise<void>;
+  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[] }[]) => Promise<GateOutcome>;
 }
 
 export function ElicitCard(props: ElicitProps) {

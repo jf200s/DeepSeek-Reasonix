@@ -22,6 +22,20 @@ func (c *Config) DisabledTools() []string {
 	return out
 }
 
+// UserDisabledTools is [tools].disabled as the user's own file wrote it, with
+// names a project appended left out. A project may remove tools for its own
+// sessions, but that is not the user asking a feature to be off, so a check for
+// "the user turned this off" must not read the merged list.
+func (c *Config) UserDisabledTools() []string {
+	if c == nil {
+		return nil
+	}
+	if !c.userDisabledSet {
+		return c.DisabledTools()
+	}
+	return slices.Clone(c.userDisabledTools)
+}
+
 // SetToolDisabled adds or removes one name from the list.
 func (c *Config) SetToolDisabled(name string, disabled bool) {
 	name = strings.TrimSpace(name)

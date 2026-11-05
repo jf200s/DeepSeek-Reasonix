@@ -19,7 +19,22 @@ func (h *Hub) RunGraceful(ctx context.Context, addr string) error {
 // that need the bound address before serving (--addr :0 with --port-file).
 func (h *Hub) RunGracefulListener(ctx context.Context, ln net.Listener) error {
 	h.auth.hosts.ListenOn(ln.Addr().String())
-	return runGracefulListener(ctx, ln, h.Handler())
+	handler := h.Handler()
+	if setting, ok := h.idleSetting(); ok {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithCancel(ctx)
+		defer cancel()
+		// Cancel our own serving context as well as whatever root the caller
+		// named: the idle exit has to end the drain this call is waiting on.
+		stopIdle := cancel
+		if setting.cancel != nil {
+			stopIdle = func() { setting.cancel(); cancel() }
+		}
+		tracker := newIdleTracker(setting.timeout, stopIdle, nil)
+		defer tracker.Stop()
+		handler = tracker.Wrap(handler)
+	}
+	return runGracefulListener(ctx, ln, handler)
 }
 
 // AllowHost lets an auth-disabled hub answer requests addressed to host, such

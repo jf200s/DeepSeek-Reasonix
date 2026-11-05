@@ -19,6 +19,14 @@ const (
 	RenderScopeProject RenderScope = "project"
 )
 
+// The run_code kernel clamps these maxima when it builds a program's limits
+// (internal/tools/ptc), so rendering a larger number would write a value the
+// next run silently lowers. Keep the saved file equal to what actually runs.
+const (
+	maxPTCProgramTimeoutSeconds = 600
+	maxPTCMaxParallel           = 16
+)
+
 // RenderTOMLForScope renders an annotated TOML file for a specific persistence
 // target. User configs can carry desktop and account-level preferences; project
 // reasonix.toml stays focused on project behavior and intentionally excludes
@@ -239,6 +247,20 @@ func RenderTOMLForScope(c *Config, scope RenderScope) string {
 	fmt.Fprintf(&b, "protect_changed_files = %v   # refuse a whole-file write over a change made since the agent last saw the file\n", c.Tools.ChangedFilesProtected())
 	fmt.Fprintf(&b, "browser_tools = %v   # built-in browser tools; the browser starts on first use\n%s\n", c.Tools.BrowserToolsEnabled(), mcpResourcesLine(c.Tools))
 	renderMCPLoadSection(&b, c.Tools.MCPLoad)
+
+	// [tools.ptc] is user-only: LoadForRoot restores the user's grant over any
+	// project value, so writing the section into a project file would be a line
+	// that never takes effect.
+	if scope != RenderScopeProject {
+		b.WriteString("[tools.ptc]   # user file only\n")
+		fmt.Fprintf(&b, "enabled = %v   # run_code: one JavaScript program calls tools; only its output enters the conversation\n", c.Tools.PTC.Enabled)
+		fmt.Fprintf(&b, "exclusive = %v   # hide every other tool from the model, so all calls go through run_code\n", c.Tools.PTC.ExclusiveMode())
+		fmt.Fprintf(&b, "timeout_seconds = %d   # one program's wall clock; 0 takes the default, the kernel caps it at %d\n", min(c.Tools.PTC.TimeoutSecondsValue(), maxPTCProgramTimeoutSeconds), maxPTCProgramTimeoutSeconds)
+		fmt.Fprintf(&b, "max_calls = %d   # host tool calls allowed in one program; 0 takes the default\n", c.Tools.PTC.MaxCalls)
+		fmt.Fprintf(&b, "max_program_bytes = %d   # program source cap; 0 takes the default\n", c.Tools.PTC.MaxProgramBytes)
+		fmt.Fprintf(&b, "max_output_bytes = %d   # what one program may send back; 0 takes the default\n", c.Tools.PTC.MaxOutputBytes)
+		fmt.Fprintf(&b, "max_parallel = %d   # tools.parallel concurrency; 0 takes the default, the kernel caps it at %d\n\n", min(c.Tools.PTC.MaxParallel, maxPTCMaxParallel), maxPTCMaxParallel)
+	}
 
 	b.WriteString("[tools.background_jobs]\n")
 	fmt.Fprintf(&b, "stalled_warning_seconds = %d   # warn once per background job after this many quiet seconds; 0 disables\n\n", c.BackgroundJobStalledWarningSeconds())

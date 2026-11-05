@@ -393,6 +393,11 @@ type Registry struct {
 	// schema. Nil means every registered tool is provider-visible (tests and
 	// legacy direct construction).
 	providerVisible map[string]bool
+	// providerExclusive pins providerVisible as a deliberate, closed surface:
+	// while set, ShowToProvider refuses additions and AddProviderVisibleTools
+	// does nothing. An explicit SetProviderVisibleTools replaces the surface
+	// the same way it replaces the names, and so clears the pin.
+	providerExclusive bool
 	// admit, when non-nil, is the ceiling on what this registry may ever hold:
 	// Add refuses every tool it rejects, so no later registration path can widen it.
 	admit     func(Tool) bool
@@ -413,13 +418,22 @@ func NewRegistry() *Registry {
 
 // SetProviderVisibleTools restricts the provider-visible schema surface to the
 // given names while keeping all registered tools executable via Get. Passing
-// nil clears the restriction. Names are normalized with strings.TrimSpace.
+// nil clears the restriction. Names are normalized with strings.TrimSpace. An
+// explicit set is the caller's whole surface for the moment, so it also lifts a
+// pin left by SetProviderVisibleToolsExclusive.
 func (r *Registry) SetProviderVisibleTools(names []string) {
 	if r == nil {
 		return
 	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.providerExclusive = false
+	r.setProviderVisibleToolsLocked(names)
+}
+
+// setProviderVisibleToolsLocked replaces the restriction. Callers hold the
+// write lock.
+func (r *Registry) setProviderVisibleToolsLocked(names []string) {
 	if names == nil {
 		if r.providerVisible != nil {
 			r.providerVisible = nil

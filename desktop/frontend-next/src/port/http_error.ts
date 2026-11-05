@@ -27,6 +27,18 @@ export class HttpError extends Error {
 
 export type DeliveryFault = "kernel_busy" | "unreachable" | "ui_stalled";
 
+// A 404 naming a runtime says the hub no longer holds that pane, so every
+// later read of it fails the same way. A 404 naming anything inside a live
+// runtime is an ordinary failure and keeps its own handling.
+export function runtimeGone(e: unknown): boolean {
+  return (
+    e instanceof HttpError &&
+    e.status === 404 &&
+    e.reason?.code === "request.not_found" &&
+    e.reason.params?.kind === "runtime"
+  );
+}
+
 // A call the kernel never answered within its bounded wait. The request may or
 // may not have landed, so the identity is the fault: the kernel was slow, could
 // not be reached, or this window's own event loop was too starved to say which.

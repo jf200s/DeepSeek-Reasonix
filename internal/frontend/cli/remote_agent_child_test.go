@@ -25,6 +25,7 @@ func TestRemoteCommandsThatChangeOrOpenAreRefusedForAnAgentChild(t *testing.T) {
 		{"status"}, {"status", "box"},
 		{"forward", "add", "box", "-L", "8080:127.0.0.1:80"}, {"forward", "rm", "box", "x"}, {"forward", "ls", "box"},
 		{"serve", "start", "box"}, {"serve", "stop", "box"},
+		{"stop", "box"},
 		{"fs", "ls", "box:/"}, {"fs", "get", "box:/x"}, {"fs", "put", "x", "box:/x"},
 		{"attach-workspace"}, {"runtime-workbench"}, {"a-subcommand-added-later"},
 	} {

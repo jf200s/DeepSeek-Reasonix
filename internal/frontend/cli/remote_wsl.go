@@ -12,7 +12,7 @@ import (
 	"reasonix/internal/platform/wsl"
 )
 
-const remoteWSLUsage = "usage: reasonix remote wsl list | wsl test <distribution> | wsl add <name> <distribution> [--workspace dir] [--serve-install auto|npm|upload|never]"
+const remoteWSLUsage = "usage: reasonix remote wsl list | wsl test <distribution> | wsl add <name> <distribution> [--workspace dir] [--serve-install auto|npm|upload|never] [--idle-timeout MINUTES]"
 
 func remoteWSLCLI(args []string) int {
 	if len(args) > 0 && args[0] == "add" {
@@ -73,13 +73,26 @@ func remoteWSLAddCLI(args []string) int {
 	fs := newFlagSet("remote wsl add")
 	workspace := fs.String("workspace", "", "default folder inside the distribution")
 	install := fs.String("serve-install", "auto", "kernel install strategy: auto|npm|upload|never")
+	idleTimeout := fs.Int("idle-timeout", config.DefaultRemoteIdleTimeoutMinutes, "minutes a kernel may sit idle before it exits (0 = at once, -1 = never)")
 	if code, ok := parseCommandFlags(fs, args[2:]); !ok {
 		return code
 	}
-	entry := config.RemoteHostEntry{Name: name, Kind: config.RemoteKindWSL, Distro: distro, Workspace: *workspace, ServeInstall: *install}
+	idleSet := flagWasSet(fs, "idle-timeout")
+	var idle *int
+	if idleSet {
+		idle = idleTimeout
+	}
+	entry := config.RemoteHostEntry{Name: name, Kind: config.RemoteKindWSL, Distro: distro, Workspace: *workspace, ServeInstall: *install, IdleTimeoutMinutes: idle}
 	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
-		if existing, ok := c.RemoteHost(name); ok && existing.HostKind() != config.RemoteKindWSL {
-			return nil, fmt.Errorf("%q is a %s machine; remove it first to add a WSL one under that name", name, existing.HostKind())
+		if existing, ok := c.RemoteHost(name); ok {
+			if existing.HostKind() != config.RemoteKindWSL {
+				return nil, fmt.Errorf("%q is a %s machine; remove it first to add a WSL one under that name", name, existing.HostKind())
+			}
+			// Re-adding replaces the row whole. The flag's absence means "leave
+			// the idle timeout as it was", not "go back to the global default".
+			if !idleSet {
+				entry.IdleTimeoutMinutes = existing.IdleTimeoutMinutes
+			}
 		}
 		return nil, c.UpsertRemoteHost(entry)
 	}); err != nil {

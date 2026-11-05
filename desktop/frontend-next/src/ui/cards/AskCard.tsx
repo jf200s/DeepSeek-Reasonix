@@ -11,13 +11,14 @@ import { LazyMarkdown } from "../LazyMarkdown";
 import { clock, useAskCountdown } from "./useAskCountdown";
 import { AskFreeText } from "./AskFreeText";
 import type { AgentPort } from "../../port/port";
+import type { GateOutcome } from "../gates";
 import { clearAskDraft, readAskDraft, writeAskDraft } from "../../state/askdraft";
 
 const ADVANCE_MS = 220;
 
 interface Props {
   item: Extract<Item, { t: "ask" }>;
-  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[] }[]) => Promise<void>;
+  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[] }[]) => Promise<GateOutcome>;
   onEngage?: (id: string) => Promise<void>;
   refine?: AgentPort["refinePrompt"];
 }
@@ -36,6 +37,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
   // not a note, and returning to Other finds it where it was.
   const [note, setNote] = useState<string[]>(saved.current.note);
   const [submitting, setSubmitting] = useState(false);
+  const [unconfirmed, setUnconfirmed] = useState(false);
   // Every request is a new object, so asking for the same pane twice still moves focus.
   const [focusTo, setFocusTo] = useState<{ q: number } | null>(null);
   const boxes = useRef<(HTMLInputElement | null)[]>([]);
@@ -153,8 +155,9 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
   const send = async (answers: string[][]) => {
     if (submitting) return;
     setSubmitting(true);
+    setUnconfirmed(false);
     try {
-      await onAnswer(item.id, item.ask.id, qs.map((q, i) => ({ questionId: q.id, selected: answers[i] })));
+      if (await onAnswer(item.id, item.ask.id, qs.map((q, i) => ({ questionId: q.id, selected: answers[i] }))) === "unconfirmed") setUnconfirmed(true);
     } finally {
       setSubmitting(false);
     }
@@ -189,6 +192,7 @@ export function AskCard({ item, onAnswer, onEngage, refine }: Props) {
             onPointerDownCapture={engage} onKeyDownCapture={engage} onInputCapture={engage}
             onWheelCapture={engage} onTouchMoveCapture={engage}>
             {!sealed && engagementError && <div className="err" role="alert">{engagementError}</div>}
+            {!sealed && unconfirmed && <div className="err" role="alert">{t("没有收到内核确认，操作可能已经生效；请以最新状态为准，需要时再提交一次。")}</div>}
             {qs.length > 1 && (
               <div className="ask-tabs" role="tablist">
                 {qs.map((q, i) => (

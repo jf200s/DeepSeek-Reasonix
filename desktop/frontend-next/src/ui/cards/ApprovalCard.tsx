@@ -90,13 +90,14 @@ function approvalReason(a: { reason?: string; reasonCode?: string }): string {
 }
 
 import type { PlanAction } from "../../port/session";
+import type { GateOutcome } from "../gates";
 export type { PlanAction };
 
 interface Props {
   item: Extract<Item, { t: "approval" }>;
-  onApprove: (itemId: string, id: string, v: ApprovalVerdict) => Promise<void>;
-  onFullAccess: (itemId: string) => Promise<void>;
-  onPlan: (itemId: string, id: string, action: PlanAction) => Promise<void>;
+  onApprove: (itemId: string, id: string, v: ApprovalVerdict) => Promise<GateOutcome>;
+  onFullAccess: (itemId: string) => Promise<GateOutcome>;
+  onPlan: (itemId: string, id: string, action: PlanAction) => Promise<GateOutcome>;
 }
 
 // The run is genuinely blocked here until Approve() resolves it, so this card
@@ -105,6 +106,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
   const sealed = item.verdict !== undefined;
   const settledBy = decisionSource(item.by, useViewer());
   const [submitting, setSubmitting] = useState<ApprovalVerdict | "">("");
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const [confirmFullAccess, setConfirmFullAccess] = useState(false);
   const [switchingFullAccess, setSwitchingFullAccess] = useState(false);
   const remembering: Remembered[] = [...(item.a.allowsSession ? ["session" as const] : []), ...(item.a.allowsPersist ? ["always" as const] : [])];
@@ -114,8 +116,9 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
   const decide = async (verdict: ApprovalVerdict) => {
     if (submitting) return;
     setSubmitting(verdict);
+    setUnconfirmed(false);
     try {
-      await onApprove(item.id, item.a.id, verdict);
+      if (await onApprove(item.id, item.a.id, verdict) === "unconfirmed") setUnconfirmed(true);
     } finally {
       setSubmitting("");
     }
@@ -123,8 +126,9 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
   const useFullAccess = async () => {
     if (switchingFullAccess) return;
     setSwitchingFullAccess(true);
+    setUnconfirmed(false);
     try {
-      await onFullAccess(item.id);
+      if (await onFullAccess(item.id) === "unconfirmed") setUnconfirmed(true);
     } finally {
       setSwitchingFullAccess(false);
     }
@@ -161,6 +165,7 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
                 <span>{t("这项设置会放宽模型的权限，所以没有「本会话内不再问」，每次都要你亲自确认。")}</span>
               </div>
             )}
+            {!sealed && unconfirmed && <div className="err" role="alert">{t("没有收到内核确认，操作可能已经生效；请以最新状态为准，需要时再提交一次。")}</div>}
             {!sealed && (
               <div className="apv-ft">
                 <button className="btn" data-primary data-action="decision.tool" data-target={item.a.id} data-value="once"
@@ -231,11 +236,13 @@ export function ApprovalCard({ item, onApprove, onFullAccess, onPlan }: Props) {
 function PlanGate({ item, onPlan }: { item: Props["item"]; onPlan: Props["onPlan"] }) {
   const sealed = item.verdict !== undefined;
   const [submitting, setSubmitting] = useState<PlanAction | "">("");
+  const [unconfirmed, setUnconfirmed] = useState(false);
   const decide = async (action: PlanAction) => {
     if (submitting) return;
     setSubmitting(action);
+    setUnconfirmed(false);
     try {
-      await onPlan(item.id, item.a.id, action);
+      if (await onPlan(item.id, item.a.id, action) === "unconfirmed") setUnconfirmed(true);
     } finally {
       setSubmitting("");
     }
@@ -261,6 +268,7 @@ function PlanGate({ item, onPlan }: { item: Props["item"]; onPlan: Props["onPlan
         <div className="out">
           <div className="apv" data-sealed={sealed ? item.verdict : undefined} aria-busy={!!submitting}>
             <div className="apv-dt">{item.a.reason || t("计划已生成，如何执行由你决定。")}</div>
+            {!sealed && unconfirmed && <div className="err" role="alert">{t("没有收到内核确认，操作可能已经生效；请以最新状态为准，需要时再提交一次。")}</div>}
             {!sealed && (
               <>
                 <div className="apv-ft">

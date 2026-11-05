@@ -7,6 +7,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/platform/remote"
 	"reasonix/internal/platform/remote/sftpfs"
@@ -144,6 +145,77 @@ func TestStopAndServeAliveCommands(t *testing.T) {
 	}
 }
 
+func TestLaunchCommandCarriesIdleTimeout(t *testing.T) {
+	paths := StatePaths{
+		Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l",
+	}
+	ninety := 90 * time.Second
+	cmd := LaunchCommand(LaunchSpec{Bin: "/usr/bin/reasonix", Workspace: "/ws", IdleTimeout: &ninety}, paths)
+	if !strings.Contains(cmd, "--idle-timeout=90s") {
+		t.Fatalf("launch command is missing the idle timeout:\n%s", cmd)
+	}
+
+	// Unset takes the deliberate default: a kernel that outlives a crashed
+	// Studio is an orphan, so every launched serve is bounded.
+	cmd = LaunchCommand(LaunchSpec{Bin: "/usr/bin/reasonix", Workspace: "/ws"}, paths)
+	if !strings.Contains(cmd, "--idle-timeout=600s") {
+		t.Fatalf("the default idle timeout is not on the command line:\n%s", cmd)
+	}
+
+	// Never still reaches the command line: the probe asks about the flag, so
+	// every launch answers the same set, and the bare -1 is how serve spells
+	// "wait for a stop".
+	never := -time.Minute
+	cmd = LaunchCommand(LaunchSpec{Bin: "/usr/bin/reasonix", Workspace: "/ws", IdleTimeout: &never}, paths)
+	if !strings.Contains(cmd, "--idle-timeout=-1") {
+		t.Fatalf("a never idle timeout is not on the command line:\n%s", cmd)
+	}
+	if strings.Contains(cmd, "--idle-timeout=-1s") {
+		t.Fatalf("a never idle timeout used a spelling serve refuses:\n%s", cmd)
+	}
+}
+
+func TestLaunchCommandRoundsPositiveIdleTimeoutUpToOneSecond(t *testing.T) {
+	paths := StatePaths{
+		Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l",
+	}
+	quarter := 250 * time.Millisecond
+	cmd := LaunchCommand(LaunchSpec{Bin: "/usr/bin/reasonix", Workspace: "/ws", IdleTimeout: &quarter}, paths)
+	if !strings.Contains(cmd, "--idle-timeout=1s") {
+		t.Fatalf("a sub-second positive timeout must not become 0s (immediate exit):\n%s", cmd)
+	}
+}
+
+// A Windows remote takes the same idle arguments as the POSIX one. Without the
+// flag its kernel has no idle exit at all, so a closed Studio leaves the
+// distribution running until someone stops it by hand.
+func TestWindowsLaunchScriptCarriesTheSameIdleArgs(t *testing.T) {
+	paths := StatePaths{
+		Dir: `C:\state`, TokenFile: `C:\state\t`, PortFile: `C:\state\p`,
+		PidFile: `C:\state\i`, LogFile: `C:\state\l`,
+	}
+	ninety := 90 * time.Second
+	_, script := windowsShell{}.LaunchScript(LaunchSpec{Bin: `C:\bin\reasonix.exe`, Workspace: `C:\ws`, IdleTimeout: &ninety}, paths)
+	if !strings.Contains(string(script), "--idle-timeout=90s") {
+		t.Fatalf("the Windows launch is missing the idle timeout:\n%s", script)
+	}
+
+	// The default and never spellings match the POSIX command line exactly, so
+	// one set of launch flags describes both remote kinds.
+	for _, d := range []*time.Duration{nil, new(time.Duration)} {
+		_, script = windowsShell{}.LaunchScript(LaunchSpec{Bin: `C:\bin\reasonix.exe`, Workspace: `C:\ws`, IdleTimeout: d}, paths)
+		want := posixIdleArgs(LaunchSpec{IdleTimeout: d})
+		if !strings.Contains(string(script), want) {
+			t.Fatalf("the Windows launch is missing %q:\n%s", want, script)
+		}
+	}
+	never := -time.Minute
+	_, script = windowsShell{}.LaunchScript(LaunchSpec{Bin: `C:\bin\reasonix.exe`, Workspace: `C:\ws`, IdleTimeout: &never}, paths)
+	if !strings.Contains(string(script), "--idle-timeout=-1") {
+		t.Fatalf("the Windows launch does not pass the never timeout:\n%s", script)
+	}
+}
+
 func TestLaunchCommandDetachAndLogHardening(t *testing.T) {
 	cmd := LaunchCommand(LaunchSpec{Bin: "/usr/bin/reasonix", Workspace: "/ws"}, StatePaths{
 		Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l",
@@ -185,30 +257,50 @@ func TestLocateCommandProbesEveryLaunchFlag(t *testing.T) {
 // --port-file and then exited on the --provider-broker it had never defined —
 // which reached the caller as "serve never reported a port".
 func TestProbedFlagsAreExactlyTheOnesTheLaunchPasses(t *testing.T) {
-	for _, withBroker := range []bool{false, true} {
-		spec := LaunchSpec{Bin: "/b/reasonix", Workspace: "/w"}
-		paths := StatePaths{Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l"}
-		if withBroker {
-			spec.BrokerAddr = "127.0.0.1:1"
-			paths.BrokerEndpoint = "/d/e"
-		}
-		passed := longFlagsIn(LaunchCommand(spec, paths))
-		probed := LaunchFlags(withBroker)
-		slices.Sort(passed)
-		slices.Sort(probed)
-		if !slices.Equal(passed, probed) {
-			t.Errorf("withBroker=%v: launch passes %v, probe asks about %v", withBroker, passed, probed)
+	zero := time.Duration(0)
+	never := -time.Minute
+	ninety := 90 * time.Second
+	idles := []struct {
+		name string
+		d    *time.Duration
+	}{
+		{"default", nil},
+		{"never", &never},
+		{"zero", &zero},
+		{"positive", &ninety},
+	}
+	for _, idle := range idles {
+		for _, withBroker := range []bool{false, true} {
+			spec := LaunchSpec{Bin: "/b/reasonix", Workspace: "/w", IdleTimeout: idle.d}
+			paths := StatePaths{Dir: "/d", TokenFile: "/d/t", PortFile: "/d/p", PidFile: "/d/i", LogFile: "/d/l"}
+			if withBroker {
+				spec.BrokerAddr = "127.0.0.1:1"
+				paths.BrokerEndpoint = "/d/e"
+			}
+			passed := longFlagsIn(LaunchCommand(spec, paths))
+			probed := LaunchFlags(withBroker)
+			slices.Sort(passed)
+			slices.Sort(probed)
+			if !slices.Equal(passed, probed) {
+				t.Errorf("%s, withBroker=%v: launch passes %v, probe asks about %v", idle.name, withBroker, passed, probed)
+			}
 		}
 	}
 }
 
-// longFlagsIn reads the --flag names off a launch command line.
+// longFlagsIn reads the --flag names off a launch command line, taking the name
+// before any `=` so --name=value reads as the same flag as --name.
 func longFlagsIn(cmd string) []string {
 	var out []string
 	for tok := range strings.FieldsSeq(cmd) {
-		if name, ok := strings.CutPrefix(tok, "--"); ok {
-			out = append(out, name)
+		name, ok := strings.CutPrefix(tok, "--")
+		if !ok {
+			continue
 		}
+		if flag, _, hasValue := strings.Cut(name, "="); hasValue {
+			name = flag
+		}
+		out = append(out, name)
 	}
 	return out
 }
@@ -395,6 +487,7 @@ func TestUsableRefusesAKernelMissingTheBrokerFlags(t *testing.T) {
 		version: "2.7.0",
 		flags: map[string]bool{
 			"addr": true, "auth": true, "token-file": true, "port-file": true, "pid-file": true,
+			"idle-timeout": true,
 		},
 	}
 	if !old.usable(MinPaneVersion, LaunchFlags(false)) {

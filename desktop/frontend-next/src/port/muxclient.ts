@@ -2,6 +2,7 @@ import { openLiveStream, type LiveStream } from "./livestream";
 import type { MuxAttachRequest, MuxEnvelope, MuxOpened } from "./mux";
 
 const UNKNOWN_CONNECTION = "mux.unknown_connection";
+const RUNTIME_NOT_FOUND = "request.not_found";
 const RETRY_MS = 2_000;
 const OPEN_WAIT_MS = 10_000;
 
@@ -32,6 +33,7 @@ export class MuxClient {
   private stream: LiveStream | null = null;
   private readonly panes = new Map<string, Pane>();
   private readonly listeners = new Set<() => void>();
+  private readonly terminals = new Set<(id: string) => void>();
 
   attach(id: string, feed: PaneFeed): LiveStream {
     const pane: Pane = { feed, paused: false, own: this.refused ? feed.own() : null };
@@ -72,6 +74,12 @@ export class MuxClient {
   onFallback(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
+  }
+
+  /** Calls back when the hub says the pane's runtime no longer exists. */
+  onTerminal(listener: (id: string) => void): () => void {
+    this.terminals.add(listener);
+    return () => this.terminals.delete(listener);
   }
 
   /** Panes riding the shared stream, for tests and diagnostics. */
@@ -160,9 +168,15 @@ export class MuxClient {
         body: JSON.stringify(body),
       });
       if (res.ok) return;
-      const code = ((await res.json().catch(() => null)) as { code?: string } | null)?.code;
-      if (res.status === 404 && code === UNKNOWN_CONNECTION) {
+      const refusal = (await res.json().catch(() => null)) as { code?: string; params?: { kind?: string } } | null;
+      if (res.status === 404 && refusal?.code === UNKNOWN_CONNECTION) {
         if (this.conn === conn) this.reopen();
+        return;
+      }
+      // A dedicated stream for the same dead runtime would 404 forever, so the
+      // pane is dropped instead of being handed one.
+      if (res.status === 404 && refusal?.code === RUNTIME_NOT_FOUND && refusal.params?.kind === "runtime") {
+        if (live()) this.terminal(id);
         return;
       }
       if (res.status === 409 || res.status === 404) {
@@ -191,6 +205,16 @@ export class MuxClient {
     pane.own = pane.feed.own();
     this.sync();
     this.listeners.forEach((l) => l());
+  }
+
+  private terminal(id: string) {
+    const pane = this.panes.get(id);
+    if (!pane) return;
+    this.panes.delete(id);
+    if (pane.own) pane.own();
+    else void this.unsubscribe(id);
+    this.sync();
+    this.terminals.forEach((l) => l(id));
   }
 }
 

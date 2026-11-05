@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"reasonix/internal/platform/remote/execfs"
 	"strings"
+	"time"
 )
 
 // StatePaths are the absolute remote-side paths for one workspace's serve
@@ -38,25 +39,42 @@ type LaunchSpec struct {
 	// starting machine's provider broker on. Empty leaves this serve resolving
 	// providers — and needing credentials — of its own.
 	BrokerAddr string
+	// IdleTimeout asks the kernel to exit after this long with no active
+	// client, so a closed or crashed Studio leaves no orphan. Nil takes the
+	// default; negative waits for a stop; zero exits once no client is left.
+	IdleTimeout *time.Duration
+}
+
+// DefaultIdleTimeout is how long a launched kernel keeps serving with no
+// client before it exits. It is long enough that a reconnect is still warm and
+// short enough that a crashed Studio does not leave a distribution running all
+// day.
+const DefaultIdleTimeout = 10 * time.Minute
+
+// idleTimeoutSeconds is what a serve state record reports for this launch:
+// whole seconds, -1 when the kernel was asked to live until stopped, or 0 when
+// it was asked to exit as soon as no client is connected.
+func idleTimeoutSeconds(d *time.Duration) int {
+	v := DefaultIdleTimeout
+	if d != nil {
+		v = *d
+	}
+	if v < 0 {
+		return -1
+	}
+	return int((v + time.Second - 1) / time.Second)
 }
 
 // LaunchCommand builds the `sh -c` script that starts a detached serve in the
-// workspace, writing the port/pid files and appending output to the log. The
-// binary path and every operand are single-quote-escaped so hostile paths
-// (spaces, quotes, `; rm -rf ~`) cannot break out.
+// workspace, writing the port/pid files and appending output to the log. Every
+// operand is single-quote-escaped so hostile paths cannot break out.
 //
-// Detachment: `setsid` fully divorces the process from any session, but it is
-// absent on stock macOS, so it is used only when present (`$SX`); `nohup` +
-// backgrounding + `</dev/null` is sufficient over a non-interactive SSH exec.
-// The log is created 0600 (umask 077 + explicit chmod) so a same-machine user
-// cannot read serve output; serve is launched with `--port-file`, which
-// suppresses its token share line, so the token never reaches the log.
-// It echoes the shell's $! so the caller can record the pid immediately.
+// The log is created 0600 and the shell's $! is echoed for the caller's pid.
 func LaunchCommand(spec LaunchSpec, p StatePaths) string {
 	return fmt.Sprintf(
 		"mkdir -p %s && cd %s && umask 077 && : >>%s && chmod 600 %s && "+
 			"SX=; command -v setsid >/dev/null 2>&1 && SX=setsid; "+
-			"$SX nohup %s serve --addr 127.0.0.1:0 --auth token --token-file %s --port-file %s --pid-file %s%s </dev/null >>%s 2>&1 & echo $!",
+			"$SX nohup %s serve --addr 127.0.0.1:0 --auth token --token-file %s --port-file %s --pid-file %s%s%s </dev/null >>%s 2>&1 & echo $!",
 		shellQuote(p.Dir),
 		shellQuote(spec.Workspace),
 		shellQuote(p.LogFile),
@@ -65,9 +83,28 @@ func LaunchCommand(spec LaunchSpec, p StatePaths) string {
 		shellQuote(p.TokenFile),
 		shellQuote(p.PortFile),
 		shellQuote(p.PidFile),
+		posixIdleArgs(spec),
 		posixBrokerArgs(spec, p),
 		shellQuote(p.LogFile),
 	)
+}
+
+// posixIdleArgs is the idle half of the serve command line. It is always
+// present: the probe asks a kernel whether it accepts --idle-timeout, so a
+// launch that left the flag off asked about a flag it would not pass. Never is
+// the bare -1 sentinel, which is the only never spelling serve's parser takes.
+// Whole seconds are rounded up so a positive timeout never degrades to 0s,
+// which the kernel reads as "exit the moment no client is connected".
+func posixIdleArgs(spec LaunchSpec) string {
+	d := DefaultIdleTimeout
+	if spec.IdleTimeout != nil {
+		d = *spec.IdleTimeout
+	}
+	if d < 0 {
+		return " --idle-timeout=-1"
+	}
+	seconds := int64((d + time.Second - 1) / time.Second)
+	return fmt.Sprintf(" --idle-timeout=%ds", seconds)
 }
 
 // posixBrokerArgs is the broker half of the serve command line, empty when
@@ -133,7 +170,7 @@ func LogsCommand(logFile string, n int) string {
 // carrying only that one answered the probe yes and then exited on a flag it
 // had never defined.
 func LaunchFlags(withBroker bool) []string {
-	flags := []string{"addr", "auth", "token-file", "port-file", "pid-file"}
+	flags := []string{"addr", "auth", "token-file", "port-file", "pid-file", "idle-timeout"}
 	if withBroker {
 		flags = append(flags, "provider-broker-file")
 	}

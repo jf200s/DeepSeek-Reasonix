@@ -65,6 +65,16 @@ func (p *Pool) Browse(ctx context.Context, host, dir string) (Listing, error) {
 	if strings.TrimSpace(dir) == "" {
 		dir = "~"
 	}
+	// Folders chosen on this side are spelled by this side. Only the machine
+	// that owns the folder can say what its own spelling of it is, and a WSL
+	// distribution wants the /mnt form of a drive letter, not the drive letter.
+	if m, ok := l.client.(workspaceMapper); ok {
+		mapped, err := m.Workspace(ctx, dir)
+		if err != nil {
+			return Listing{}, err
+		}
+		dir = mapped
+	}
 	at, entries, err := l.client.Dirs(ctx, dir)
 	if errors.Is(err, sftpfs.ErrNotListable) {
 		out := listingOf(at, nil)

@@ -93,8 +93,12 @@ type Options struct {
 	ResolveDownload func(context.Context, string, string, string) (releaseasset.CLIDownload, error) // names the release archive so the remote can fetch it itself
 	MinVersion      string                                                                          // version floor; empty leaves the flag probe as the only gate
 	Broker          Broker                                                                          // resolve providers back over the tunnel; zero leaves the remote on its own credentials
-	Progress        func(step, detail string)                                                       // optional progress callback
-	Clock           func() time.Time                                                                // nil => time.Now
+	// IdleTimeout is how long the kernel may sit with no client before it
+	// exits. Nil takes DefaultIdleTimeout, a negative value keeps it until
+	// stopped, and zero exits as soon as the last client goes.
+	IdleTimeout *time.Duration
+	Progress    func(step, detail string) // optional progress callback
+	Clock       func() time.Time          // nil => time.Now
 }
 
 func (o Options) progress(step, detail string) {
@@ -204,7 +208,7 @@ func launchServe(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.File
 		}
 	}
 	opts.progress("launch", "")
-	spec := LaunchSpec{Bin: bin, Workspace: workspace, BrokerAddr: opts.Broker.Addr}
+	spec := LaunchSpec{Bin: bin, Workspace: workspace, BrokerAddr: opts.Broker.Addr, IdleTimeout: opts.IdleTimeout}
 	if scriptPath, script := target.LaunchScript(spec, paths); scriptPath != "" {
 		if err := fs.WriteFileAtomic(ctx, scriptPath, script, 0o600); err != nil {
 			cleanupFailedLaunch(conn, target, fs, paths, 0)
@@ -244,15 +248,16 @@ func launchServe(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.File
 	}
 
 	st := ServeState{
-		PID:        pid,
-		Addr:       addr,
-		Workspace:  workspace,
-		Version:    version,
-		Broker:     opts.Broker.Addr,
-		BrokerFile: opts.Broker.configured(),
-		TokenFile:  paths.TokenFile,
-		LogFile:    paths.LogFile,
-		StartedAt:  nowUnix(opts.clock()),
+		PID:                pid,
+		Addr:               addr,
+		Workspace:          workspace,
+		Version:            version,
+		Broker:             opts.Broker.Addr,
+		BrokerFile:         opts.Broker.configured(),
+		TokenFile:          paths.TokenFile,
+		LogFile:            paths.LogFile,
+		StartedAt:          nowUnix(opts.clock()),
+		IdleTimeoutSeconds: idleTimeoutSeconds(opts.IdleTimeout),
 	}
 	data, err := MarshalState(st)
 	if err != nil {

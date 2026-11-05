@@ -153,6 +153,13 @@ describe("closing a pane the kernel no longer has", () => {
     await expect(new SseHub().close("r1")).resolves.toBeUndefined();
   });
 
+  it("counts an uncoded 404 or 410 from a proxy as closed too", async () => {
+    for (const status of [404, 410]) {
+      answer(status, "");
+      await expect(new SseHub().close("r1")).resolves.toBeUndefined();
+    }
+  });
+
   it("still surfaces every other refusal", async () => {
     answer(500, JSON.stringify({ code: "internal", error: "teardown failed" }));
     await expect(new SseHub().close("r1")).rejects.toBeInstanceOf(HttpError);

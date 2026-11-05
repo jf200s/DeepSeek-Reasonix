@@ -11,12 +11,15 @@ import (
 // section is one subject, and because the renderer it came from is already the
 // longest function in the package.
 func renderRemoteSection(b *strings.Builder, r RemoteConfig) {
-	if !r.ImportSSHConfig && len(r.Hosts) == 0 {
+	if !r.ImportSSHConfig && r.IdleTimeoutMinutes == nil && len(r.Hosts) == 0 {
 		return
 	}
 	b.WriteString("[remote]   # SSH remote hosts; user/global only, ./reasonix.toml cannot override\n")
 	if r.ImportSSHConfig {
 		b.WriteString("import_ssh_config = true   # surface ~/.ssh/config aliases in `reasonix remote import`\n")
+	}
+	if r.IdleTimeoutMinutes != nil {
+		fmt.Fprintf(b, "idle_timeout_minutes = %d   # exit a kernel after this long idle (0 = at once, -1 = never); unset: wsl %d min, ssh never\n", *r.IdleTimeoutMinutes, DefaultRemoteIdleTimeoutMinutes)
 	}
 	for _, h := range r.Hosts {
 		b.WriteString("\n[[remote.hosts]]\n")
@@ -55,13 +58,20 @@ func renderRemoteSection(b *strings.Builder, r RemoteConfig) {
 			fmt.Fprintf(b, "workspaces = %s   # the other projects on this machine\n", renderStringArray(h.Workspaces))
 		}
 		if h.ServeInstall != "" {
-			fmt.Fprintf(b, "serve_install = %q   # auto|npm|upload|never\n", h.ServeInstall)
+			// Write the strategy that will actually be used: a WSL host reads
+			// upload back as auto (the distribution cannot run this side's
+			// binary), so rendering the stored word would preserve a line that
+			// can never take effect.
+			fmt.Fprintf(b, "serve_install = %q   # auto|npm|upload|never (wsl hosts cannot upload)\n", h.ServeInstallMode())
 		}
 		if h.UseSSHConfig {
 			b.WriteString("use_ssh_config = true   # layer ~/.ssh/config values under unset fields\n")
 		}
 		if h.Disabled {
 			b.WriteString("disabled = true   # kept in the book but not dialed\n")
+		}
+		if h.IdleTimeoutMinutes != nil {
+			fmt.Fprintf(b, "idle_timeout_minutes = %d   # this host's idle exit; 0 = at once, -1 = never\n", *h.IdleTimeoutMinutes)
 		}
 		for _, f := range h.Forwards {
 			b.WriteString("\n[[remote.hosts.forwards]]\n")

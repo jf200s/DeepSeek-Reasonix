@@ -55,8 +55,8 @@ func remoteWSLTest(name string, entry config.RemoteHostEntry, version string) in
 }
 
 // remoteWSLConnect brings up the kernel in the distribution and prints where to
-// reach it. The link is held while this command runs: the kernel lives in a
-// session this process keeps open and stops with it.
+// reach it. The link is held while this command runs; the kernel outlives it
+// and ends on its own idle timeout, or on `reasonix remote stop`.
 func remoteWSLConnect(name string, entry config.RemoteHostEntry, syntax remoteConnectSyntax, version string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -89,7 +89,7 @@ func remoteWSLConnect(name string, entry config.RemoteHostEntry, syntax remoteCo
 	if syntax.open {
 		_ = openInBrowser(url)
 	}
-	fmt.Fprintln(os.Stderr, "Press Ctrl-C to disconnect (the kernel stops with the distribution).")
+	fmt.Fprintln(os.Stderr, "Press Ctrl-C to disconnect (the kernel keeps running for reconnect, then exits after its idle timeout).")
 	<-ctx.Done()
 	fmt.Fprintln(os.Stderr, i18n.M.RemoteDisconnected)
 	return 0

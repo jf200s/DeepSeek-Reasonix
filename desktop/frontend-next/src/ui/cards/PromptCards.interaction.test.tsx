@@ -52,6 +52,40 @@ describe("decision cards", () => {
     expect(approve).toHaveBeenCalledTimes(2);
   });
 
+  it("says a decision was not confirmed, and clears that when it is tried again", async () => {
+    const item = {
+      t: "approval", id: "row", a: { id: "gate", tool: "bash", subject: "run checks" },
+    } as Extract<Item, { t: "approval" }>;
+    let release = () => {};
+    const approve = vi.fn()
+      .mockResolvedValueOnce("unconfirmed")
+      .mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+    render(<ApprovalCard item={item} onApprove={approve} onFullAccess={vi.fn(pending)} onPlan={vi.fn(pending)} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "允许这一次" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("没有收到内核确认"));
+    expect((screen.getByRole("button", { name: "允许这一次" }) as HTMLButtonElement).disabled).toBe(false);
+
+    await userEvent.click(screen.getByRole("button", { name: "允许这一次" }));
+    expect(screen.queryByRole("alert")).toBeNull();
+    release();
+    await waitFor(() => expect((screen.getByRole("button", { name: "允许这一次" }) as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("says an answer was not confirmed and leaves it answerable", async () => {
+    const item = {
+      t: "ask", id: "row", ask: { id: "ask", questions: [
+        { id: "q", header: "方向", prompt: "选哪个？", multi: false, options: [{ label: "A" }, { label: "B" }] },
+      ] },
+    } as Extract<Item, { t: "ask" }>;
+    render(<AskCard item={item} onAnswer={vi.fn().mockResolvedValue("unconfirmed")} />);
+
+    await userEvent.click(screen.getByRole("button", { name: "A" }));
+    await userEvent.click(screen.getByRole("button", { name: "确认" }));
+    await waitFor(() => expect(screen.getByRole("alert").textContent).toContain("没有收到内核确认"));
+    expect((screen.getByRole("button", { name: "确认" }) as HTMLButtonElement).disabled).toBe(false);
+  });
+
   // An answer the host drops must not be offered: the card used to promise "do
   // not ask again" and send a grant that died with the session, and the grant
   // that actually writes a rule was not reachable from this window at all.

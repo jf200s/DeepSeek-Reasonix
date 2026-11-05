@@ -643,7 +643,7 @@ func (h *Hub) routeDefault(w http.ResponseWriter, r *http.Request) {
 	h.mu.RUnlock()
 	if local == nil {
 		if far != nil {
-			refuseDeviceBeforeForwarding(refuseLocalOnly(remoteProxy(far.remote.ep))).ServeHTTP(w, r)
+			refuseDeviceBeforeForwarding(refuseLocalOnly(remoteProxyAt(h.remoteEndpoint(far)))).ServeHTTP(w, r)
 			return
 		}
 		// A reload with every pane closed still needs the page back. Only past
@@ -662,7 +662,7 @@ func (h *Hub) routeDefault(w http.ResponseWriter, r *http.Request) {
 // prefix is stripped here so the runtime's own routes stay unprefixed.
 func (h *Hub) publish(rt *Runtime) error {
 	if rt.remote != nil {
-		rt.handler = http.StripPrefix(runtimePrefix+rt.ID, refuseDeviceBeforeForwarding(refuseLocalOnly(remoteProxy(rt.remote.ep))))
+		rt.handler = http.StripPrefix(runtimePrefix+rt.ID, refuseDeviceBeforeForwarding(refuseLocalOnly(remoteProxyAt(h.remoteEndpoint(rt)))))
 	} else {
 		rt.Server.bindMu.Lock()
 		rt.Server.mu.Lock()

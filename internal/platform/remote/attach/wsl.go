@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"strconv"
 	"strings"
 	"sync"
@@ -82,6 +83,13 @@ func (l *wslLink) Workspace(ctx context.Context, p string) (string, error) {
 	return l.ToLinux(ctx, p)
 }
 
+// relaunchAfterReconnect marks this link's kernels as possibly gone when the
+// link returns. WSL does not end a detached kernel with the session that
+// launched it, but the kernel's own idle timeout may have ended it while the
+// link was down; a reconnect therefore re-runs EnsureServe for every workspace,
+// which reuses a live kernel and launches a cold one only when needed.
+func (l *wslLink) relaunchAfterReconnect() {}
+
 // Start wakes the distribution: the first command is what boots it, and a
 // distribution that cannot answer one is reported as the connect failing.
 func (l *wslLink) Start(ctx context.Context) error {
@@ -117,9 +125,10 @@ func (l *wslLink) Start(ctx context.Context) error {
 var anchorRetry = 2 * time.Second
 
 // holdAnchor keeps one shell session open and feeds it the commands that must
-// outlive the call that sent them: WSL ends everything a wsl.exe session
-// started when it ends, setsid and nohup included. A lost session is asked for
-// again, and the kernel it held is gone.
+// outlive the call that sent them. It is a convenience, not the kernel's
+// lifetime: on WSL 2.7.14 with systemd, setsid detaches a launched process from
+// the session, so ending the session (or wsl.exe) does not end what it started.
+// A lost session is asked for again, and the kernel it launched keeps running.
 func (l *wslLink) holdAnchor(ctx context.Context) {
 	defer close(l.anchorDone)
 	for attempt := 1; ctx.Err() == nil; attempt++ {
@@ -159,8 +168,9 @@ func (l *wslLink) holdAnchor(ctx context.Context) {
 }
 
 // ErrNoSession: the session that launches long-lived processes is not up, or
-// ended before the command it was given finished.
-var ErrNoSession = errors.New("attach: the WSL session that keeps a kernel alive is not open")
+// ended before the command it was given finished. The processes it launched are
+// not tied to it; only the call that staged them is.
+var ErrNoSession = errors.New("attach: the WSL session used to launch a kernel is not open")
 
 // ErrUnsafeScratch: the directory launch commands are staged in is not the
 // current user's private directory, so what is written there could be read or
@@ -272,10 +282,14 @@ func (l *wslLink) collect(ctx context.Context, id string) (remote.ExecResult, er
 	return remote.ExecResult{Stdout: out, Stderr: errb, ExitCode: code}, nil
 }
 
+// Close ends the link but deliberately not the kernel: the kernel's own idle
+// timeout is what ends it, so a reconnect finds it still serving. A link that
+// never started has nothing to say.
 func (l *wslLink) Close() error {
 	if l.anchorStop != nil {
 		l.anchorStop()
 		<-l.anchorDone
+		slog.Info(fmt.Sprintf("attach: kernel kept running for reconnect; stop it with `reasonix remote stop %s`", l.host), "host", l.host)
 	}
 	l.publish(remote.StatusEvent{Status: remote.StatusStopped})
 	return nil

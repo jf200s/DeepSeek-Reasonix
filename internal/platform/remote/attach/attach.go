@@ -15,6 +15,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"reasonix/internal/contract/config"
 	"reasonix/internal/platform/releaseasset"
@@ -100,6 +101,10 @@ type Pool struct {
 	links map[string]*link
 	// follow serialises re-pointing kernels at a moved broker.
 	follow sync.Mutex
+	// reconnect serialises what one recovered link must do: the kernels that
+	// died with it are launched again one workspace at a time, and two status
+	// events arriving together must not start two.
+	reconnect sync.Mutex
 }
 
 func NewPool(ctx context.Context, opts Options) *Pool {
@@ -129,9 +134,12 @@ type link struct {
 	// provider is where this host's model credentials come from, read at dial
 	// beside install. A host set to resolve its own gets no broker forward.
 	provider string
-	refs     int
-	spaces   map[string]*space
-	state    HostState
+	// idleTimeout is how long a kernel here may sit with no client before it
+	// exits, read at dial. Nil (a host not in the book) takes the default.
+	idleTimeout *time.Duration
+	refs        int
+	spaces      map[string]*space
+	state       HostState
 	// One -R per host, not per workspace: the broker is one process on this
 	// side, and every kernel over there reaches it through the same forward.
 	brokerOnce sync.Once
@@ -181,6 +189,80 @@ func boundBroker(client Link) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+// afterReconnect repairs what a link's return changed. An SSH kernel outlives
+// the link and only needs to be told where the broker moved; a WSL kernel may
+// have ended on its own idle timeout while the link was down, so every
+// workspace has to be ensured again.
+func (p *Pool) afterReconnect(l *link, client Link) {
+	p.reconnect.Lock()
+	defer p.reconnect.Unlock()
+	p.followBroker(l, client)
+	p.relaunch(l, client)
+}
+
+// relaunch makes sure every workspace a link still carries has a kernel again
+// when the link returns. The endpoint a pane holds keeps the old address until
+// the space is repointed here, which is why Attach's spaces are mutable rather
+// than a value a caller copies aside.
+func (p *Pool) relaunch(l *link, client Link) {
+	if _, ok := client.(relaunchOnReconnect); !ok {
+		return
+	}
+	p.mu.Lock()
+	spaces := make([]*space, 0, len(l.spaces))
+	for _, s := range l.spaces {
+		spaces = append(spaces, s)
+	}
+	p.mu.Unlock()
+	for _, s := range spaces {
+		// A first attach still bringing this workspace up owns it; its own
+		// EnsureServe is the launch this relaunch would duplicate.
+		select {
+		case <-s.ready:
+		default:
+			continue
+		}
+		p.mu.Lock()
+		held := l.spaces[s.key] == s
+		p.mu.Unlock()
+		if !held {
+			continue
+		}
+		if err := p.launch(p.ctx, l, s, s.key, Call{}); err != nil {
+			p.record(l, func(st *HostState) { st.Err = err.Error() })
+			continue
+		}
+		p.record(l, func(st *HostState) { st.Err, st.Step, st.Detail = "", "", "" })
+	}
+}
+
+// Resolve reports where a workspace on host is reachable now. A link that came
+// back relaunches its kernel on a new local port, and a pane that kept only the
+// endpoint it was opened on would keep calling the one that stopped answering.
+func (p *Pool) Resolve(host, workspace string) (Endpoint, bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	l := p.links[host]
+	if l == nil {
+		return Endpoint{}, false
+	}
+	for _, s := range l.spaces {
+		if s.key != workspace && s.workspace != workspace {
+			continue
+		}
+		select {
+		case <-s.ready:
+		default:
+			continue
+		}
+		if s.addr == "" {
+			continue
+		}
+		return Endpoint{Host: host, Workspace: s.workspace, Addr: s.addr, Token: s.token}, true
+	}
+	return Endpoint{}, false
 }
 
 // followBroker points every kernel on l at the broker's forward after the link
@@ -294,13 +376,19 @@ func (p *Pool) Attach(ctx context.Context, host, workspace string, call Call) (*
 		p.dropSpace(l, s, unsubscribe)
 		return nil, err
 	}
-	return &Endpoint{
+	// Read under the pool's lock: a reconnect relaunches this workspace's
+	// kernel and rewrites these while panes opened before it still ask, and a
+	// half-read pair would be one pane's address with another's token.
+	p.mu.Lock()
+	ep := &Endpoint{
 		Host:      host,
 		Workspace: s.workspace,
 		Addr:      s.addr,
 		Token:     s.token,
-		release:   func() { p.dropSpace(l, s, unsubscribe) },
-	}, nil
+	}
+	p.mu.Unlock()
+	ep.release = func() { p.dropSpace(l, s, unsubscribe) }
+	return ep, nil
 }
 
 // Close tears down every connection this pool holds.
@@ -357,6 +445,8 @@ func (p *Pool) dial(l *link, call Call) (unsubscribe func()) {
 	if configured {
 		l.install = entry.ServeInstallMode()
 		l.provider = entry.ProviderMode()
+		idle := entry.IdleTimeout(cfg.Remote.IdleTimeoutMinutes)
+		l.idleTimeout = &idle
 	}
 	var client Link
 	if configured && entry.HostKind() == config.RemoteKindWSL {
@@ -378,7 +468,7 @@ func (p *Pool) dial(l *link, call Call) (unsubscribe func()) {
 			}
 		})
 		if ev.Status == remote.StatusConnected && ev.Attempt > 0 {
-			go p.followBroker(l, client)
+			go p.afterReconnect(l, client)
 		}
 	})
 	if call.OnStatus != nil {
@@ -451,16 +541,27 @@ func (p *Pool) holdSpace(l *link, workspace string) (*space, bool) {
 	return s, true
 }
 
-// serve brings up the remote kernel for one workspace and binds the forward
-// that reaches it.
+// serve brings up the remote kernel for one workspace, binds the forward that
+// reaches it, and opens the gate every other caller on this space waits on.
 func (p *Pool) serve(ctx context.Context, l *link, s *space, workspace string, call Call) {
 	defer close(s.ready)
+	if err := p.launch(ctx, l, s, workspace, call); err != nil {
+		s.err = err
+		p.forgetSpace(l, s)
+		return
+	}
+	p.record(l, func(st *HostState) { st.Step, st.Detail = "", "" })
+}
+
+// launch makes sure a kernel is running for workspace and points the space at
+// it. It is the one body a first attach and a post-reconnect relaunch share:
+// both have to map the folder, ask for a kernel, and publish the forward that
+// reaches the one they got.
+func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, call Call) error {
 	if m, ok := l.client.(workspaceMapper); ok {
 		mapped, err := m.Workspace(ctx, workspace)
 		if err != nil {
-			s.err = err
-			p.forgetSpace(l, s)
-			return
+			return err
 		}
 		workspace = mapped
 	}
@@ -472,14 +573,13 @@ func (p *Pool) serve(ctx context.Context, l *link, s *space, workspace string, c
 	// and a kernel already running cannot be told a new one.
 	brokerAddr, err := p.broker(l)
 	if err != nil {
-		s.err = err
-		p.forgetSpace(l, s)
-		return
+		return err
 	}
 	res, err := bootstrap.EnsureServe(ctx, l.client, bootstrap.Options{
 		Workspace:       workspace,
 		Broker:          bootstrap.Broker{Addr: brokerAddr, Token: p.opts.Broker.Token},
 		Install:         install,
+		IdleTimeout:     l.idleTimeout,
 		LocalBinary:     p.opts.LocalBinary,
 		LocalGOOS:       runtime.GOOS,
 		LocalGOARCH:     runtime.GOARCH,
@@ -495,9 +595,7 @@ func (p *Pool) serve(ctx context.Context, l *link, s *space, workspace string, c
 		},
 	})
 	if err != nil {
-		s.err = err
-		p.forgetSpace(l, s)
-		return
+		return err
 	}
 	// Named per workspace: a second one on this host must not replace the
 	// first one's forward, which one shared reserved name would do.
@@ -509,14 +607,16 @@ func (p *Pool) serve(ctx context.Context, l *link, s *space, workspace string, c
 		TargetAddr: res.State.Addr,
 	})
 	if err != nil {
-		s.err = fmt.Errorf("forward remote serve: %w", err)
-		p.forgetSpace(l, s)
-		return
+		return fmt.Errorf("forward remote serve: %w", err)
 	}
-	p.record(l, func(st *HostState) { st.Step, st.Detail = "", "" })
+	// Read under the pool's lock: a relaunch overwrites these while panes that
+	// were opened on the old kernel are still asking where that kernel is.
+	p.mu.Lock()
 	// The kernel's own spelling, not the file layer's: this is what goes back
 	// to that kernel when a pane opens a workspace on it.
 	s.workspace, s.addr, s.token, s.forward = res.Workspace, bound, res.Token, name
+	p.mu.Unlock()
+	return nil
 }
 
 func (p *Pool) forgetSpace(l *link, s *space) {
@@ -539,10 +639,13 @@ func (p *Pool) dropSpace(l *link, s *space, unsubscribe func()) {
 	if last && l.spaces[s.key] == s {
 		delete(l.spaces, s.key)
 	}
+	// A relaunch can replace the forward while this release is running, so the
+	// name is read under the same lock launch writes it with.
+	forward := s.forward
 	client := l.client
 	p.mu.Unlock()
-	if last && s.forward != "" && client != nil {
-		_ = client.Forwards().Remove(s.forward)
+	if last && forward != "" && client != nil {
+		_ = client.Forwards().Remove(forward)
 	}
 	p.dropLink(l)
 }

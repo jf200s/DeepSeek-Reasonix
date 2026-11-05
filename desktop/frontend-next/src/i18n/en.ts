@@ -1048,6 +1048,8 @@ export const EN: Record<string, string> = {
   "已允许：已保存为规则。": "Allowed: recorded as a rule.",
   "已写入配置，后续会话中此类操作也始终允许，不再询问。": "Written to the config; later sessions will also always allow this kind without asking.",
   "正在提交…": "Submitting…",
+  "没有收到内核确认，操作可能已经生效；请以最新状态为准，需要时再提交一次。":
+    "No confirmation from the kernel. The action may already have taken effect; check the latest state and submit again if needed.",
   "已在其他窗口处理。": "Handled in another window.",
   "请以最新运行状态为准。": "Refer to the latest run state.",
   "已在其他窗口处理，请以最新运行状态为准。": "Handled in another window. Refer to the latest run state.",

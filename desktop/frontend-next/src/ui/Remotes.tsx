@@ -91,6 +91,12 @@ export function Remotes({ hub, onError }: Props) {
   }, [reload]);
 
   const save = async (entry: RemoteHostEdit) => {
+    // A WSL distribution runs on the other side's platform, so the copy this
+    // side would upload cannot run there. A value left from another row is
+    // saved as the strategy that can work.
+    if (entry.kind === "wsl" && entry.serveInstall === "upload") {
+      entry = { ...entry, serveInstall: "auto" };
+    }
     setBusy(entry.name);
     try {
       await hub.saveRemoteHost(entry);
@@ -372,7 +378,9 @@ export function Remotes({ hub, onError }: Props) {
             >
               <option value="auto">{t("自动选择")}</option>
               <option value="npm">{t("使用远端的 npm")}</option>
-              <option value="upload">{t("上传本机的副本")}</option>
+              {/* Uploading is this side's binary, and a WSL distribution is
+                  another platform; offering it would be offering a failure. */}
+              {!isWSL && <option value="upload">{t("上传本机的副本")}</option>}
               <option value="never">{t("不安装，已自行安装")}</option>
             </select>
           </label>

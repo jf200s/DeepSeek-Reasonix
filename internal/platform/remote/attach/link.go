@@ -15,6 +15,9 @@ import (
 type Link interface {
 	bootstrap.Conn
 	Start(ctx context.Context) error
+	// Close ends this connection, not the kernels started over it. An SSH host's
+	// serve and a WSL kernel both outlive the link, so the next connect reuses
+	// one that is still serving and `reasonix remote stop` is what ends it.
 	Close() error
 	Subscribe(fn func(remote.StatusEvent)) (cancel func())
 	Forwards() Forwards
@@ -28,6 +31,15 @@ type Link interface {
 // open it.
 type workspaceMapper interface {
 	Workspace(ctx context.Context, p string) (string, error)
+}
+
+// relaunchOnReconnect is a Link whose kernels may be gone when the link comes
+// back, so every workspace it still carries has to be launched again before the
+// link can answer for it. A WSL kernel is kept alive on purpose, but its own
+// idle timeout may have ended it while the link was down; relaunching is safe
+// either way because EnsureServe reuses a kernel that is still running.
+type relaunchOnReconnect interface {
+	relaunchAfterReconnect()
 }
 
 // Forwards is the part of a forward registry the pool drives.

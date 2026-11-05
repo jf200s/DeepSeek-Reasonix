@@ -9,6 +9,7 @@ import type { Tool } from "../../port/wire";
 import { surfaceOfTool, surfaceFields, surfaceActions, actionSurfaceOfTool } from "./call";
 import "./SurfaceCard.css";
 import { SurfaceMediaContext, type SurfaceMediaPort } from "./media-context";
+import type { GateOutcome } from "../gates";
 
 const NativeSurface = lazySurface(() => import("./a2ui/form"));
 
@@ -29,7 +30,7 @@ export function surfaceTool(tool: Tool, running: boolean, port?: Partial<Surface
 export interface SurfaceCardProps {
   port?: SurfaceMediaPort;
   item: Extract<Item, { t: "ask" }>;
-  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[]; value?: Record<string, unknown> }[]) => Promise<void>;
+  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[]; value?: Record<string, unknown> }[]) => Promise<GateOutcome>;
 }
 
 export function SurfaceCard(props: SurfaceCardProps) {

@@ -18,6 +18,7 @@ import (
 	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/remote"
 	"reasonix/internal/platform/remote/bootstrap"
+	"reasonix/internal/platform/remote/sftpfs"
 	"reasonix/internal/platform/remote/sshtest"
 )
 
@@ -274,6 +275,119 @@ func TestAFailedDialIsNotCached(t *testing.T) {
 	refuse = false
 	ep := mustAttach(t, p, "box", m.workspace(t, "proj"))
 	defer ep.Release()
+}
+
+// Resolve reports where a workspace answers now. A pane holds the endpoint it
+// was opened on, and a kernel relaunched behind it lands on another port; this
+// is the one call that follows it.
+func TestResolveReportsTheForwardAWorkspaceIsOn(t *testing.T) {
+	m := fakeMachine(t)
+	p := testPool(t, m)
+	ws := m.workspace(t, "proj")
+	ep := mustAttach(t, p, "box", ws)
+	defer ep.Release()
+
+	got, ok := p.Resolve("box", ws)
+	if !ok || got.Addr != ep.Addr || got.Token != ep.Token {
+		t.Fatalf("Resolve = %s/%s, %v, want the attached forward %s", got.Addr, got.Token, ok, ep.Addr)
+	}
+	if _, ok := p.Resolve("box", m.workspace(t, "other")); ok {
+		t.Fatal("Resolve answered for a workspace the pool does not hold")
+	}
+}
+
+// relaunchWatch is a Link whose far side refuses the bootstrap at its first
+// step. Nothing needs to succeed: counting that step says whether a reconnect
+// tried to launch the workspace again.
+type relaunchWatch struct {
+	mu    sync.Mutex
+	files int
+}
+
+func (w *relaunchWatch) Exec(context.Context, string) (remote.ExecResult, error) {
+	return remote.ExecResult{}, fmt.Errorf("no kernel here")
+}
+
+func (w *relaunchWatch) Files() (sftpfs.Files, error) {
+	w.mu.Lock()
+	w.files++
+	w.mu.Unlock()
+	return nil, fmt.Errorf("no files here")
+}
+
+func (w *relaunchWatch) Start(context.Context) error { return nil }
+func (w *relaunchWatch) Close() error                { return nil }
+
+func (w *relaunchWatch) Subscribe(func(remote.StatusEvent)) func() { return func() {} }
+func (w *relaunchWatch) Forwards() Forwards                        { return nil }
+
+func (w *relaunchWatch) Dirs(context.Context, string) (string, []sftpfs.Entry, error) {
+	return "", nil, fmt.Errorf("no dirs here")
+}
+
+func (w *relaunchWatch) launches() int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return w.files
+}
+
+// ephemeralWatch is relaunchWatch carrying the marker a link whose kernels may
+// need relaunching on reconnect has, the way a WSL distribution does.
+type ephemeralWatch struct{ *relaunchWatch }
+
+func (ephemeralWatch) relaunchAfterReconnect() {}
+
+func watchPool(t *testing.T, client Link) (*Pool, *link, *space) {
+	t.Helper()
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	p := NewPool(t.Context(), Options{})
+	t.Cleanup(p.Close)
+	l, _ := p.holdLink("dev")
+	l.client = client
+	s, _ := p.holdSpace(l, "/srv/app")
+	return p, l, s
+}
+
+// A WSL kernel ends with the session holding it, so a reconnect launches every
+// workspace the link still carries again. Without this the pane keeps asking a
+// kernel that is gone for the rest of the link's life.
+func TestAReconnectLaunchesEphemeralKernelsAgain(t *testing.T) {
+	client := &ephemeralWatch{&relaunchWatch{}}
+	p, l, s := watchPool(t, client)
+	close(s.ready) // the first attach finished; this kernel is the workspace's own
+
+	p.afterReconnect(l, client)
+	if got := client.launches(); got != 1 {
+		t.Fatalf("the workspace was launched %d time(s) after reconnect, want 1", got)
+	}
+	if st := p.States()["dev"]; st.Err == "" {
+		t.Fatal("a relaunch that failed was not reported on the host")
+	}
+}
+
+// An SSH kernel outlives the link; the next connect reuses the one still
+// running, and launching another would leave two serves for one folder.
+func TestAReconnectLeavesAKernelThatOutlivesTheLinkAlone(t *testing.T) {
+	client := &relaunchWatch{}
+	p, l, s := watchPool(t, client)
+	close(s.ready)
+
+	p.afterReconnect(l, client)
+	if got := client.launches(); got != 0 {
+		t.Fatalf("an ssh kernel was launched %d time(s) after reconnect, want 0", got)
+	}
+}
+
+// A first attach still bringing the space up owns its launch; a reconnect that
+// arrives alongside it must not start a second kernel for the workspace.
+func TestAReconnectLeavesAFirstAttachToItsOwnLaunch(t *testing.T) {
+	client := &ephemeralWatch{&relaunchWatch{}}
+	p, l, _ := watchPool(t, client)
+
+	p.afterReconnect(l, client)
+	if got := client.launches(); got != 0 {
+		t.Fatalf("a workspace still being attached was launched %d time(s), want 0", got)
+	}
 }
 
 // kernelFlagsYes is a current kernel's answer to the probe: every flag the

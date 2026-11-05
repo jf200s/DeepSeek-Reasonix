@@ -67,6 +67,7 @@ import { cancelJob } from "./jobcancel";
 import { ConnectNote } from "./ConnectNote";
 import { useStatusPoll } from "./useStatusPoll";
 import { useStatusRefresh } from "./useStatusRefresh";
+import { runtimeGone } from "../port/http_error";
 import { useCheckpointRefresh } from "./useCheckpointRefresh";
 import { LiveWork, useLiveWork } from "../state/foldpref";
 import { loadChangedFilesPref, useShowsChangedFiles } from "../state/changedfiles";
@@ -97,7 +98,7 @@ const totalsOf = (st: SessionStatus) => ({
   incompleteReason: st.sessionCostQuote?.incompleteReason,
 });
 
-function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, onTurnDone, pulse, findPulse, findTogglePulse = 0, filesPulse = 0, viewRequest, sessionRef, onSettings, onFeedback, onOpenSession, needsProject, onOpenProject, onKeepHere, connect, theme, dockW, dockMax, onDockW, manualBrowser = false, onManualBrowser, alert }: PaneProps) {
+function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFocus, onReport, onSessionChanged, onTurnDone, pulse, findPulse, findTogglePulse = 0, filesPulse = 0, viewRequest, sessionRef, onSettings, onFeedback, onOpenSession, needsProject, onOpenProject, onKeepHere, onGone, connect, theme, dockW, dockMax, onDockW, manualBrowser = false, onManualBrowser, alert }: PaneProps) {
   const [s, dispatch] = useReducer(reduce, initialState);
   const [traj, trajDispatch] = useReducer(reduceTraj, initialTraj);
   const [sessionRead, setSessionRead] = useState<SessionRead>({ kind: "pending" });
@@ -191,7 +192,23 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   }, []);
 
   const readJob = useCallback((id: string) => port.jobOutput(id), [port]);
-  const refreshStatus = useStatusRefresh(port, applyStatus, statusRead);
+  // A pane whose runtime is gone keeps its last content on screen, but nothing
+  // it asks for can succeed again, so every poller stops and the window is told
+  // to forget it.
+  const goneRef = useRef(false);
+  const [gone, setGone] = useState(false);
+  const markGone = useCallback(() => {
+    if (goneRef.current) return;
+    goneRef.current = true;
+    setGone(true);
+    onGone?.(rt.id);
+  }, [onGone, rt.id]);
+  const terminalRead = useCallback((e: unknown) => {
+    if (!runtimeGone(e)) return false;
+    markGone();
+    return true;
+  }, [markGone]);
+  const refreshStatus = useStatusRefresh(port, applyStatus, statusRead, terminalRead);
 
   const [wallet, refreshWallet] = useWallet(port, accountOf(status?.modelRef));
   const hideAmounts = useHidesAmounts();
@@ -199,14 +216,15 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
   useEffect(() => { void loadReceiptPref(port, !rt.host); }, [port, rt.host]);
 
   const revalue = useCallback(() => {
-    port.status().then((st) => { applyStatus(st); dispatch(totalsOf(st) as never); }).catch(() => {});
+    port.status().then((st) => { applyStatus(st); dispatch(totalsOf(st) as never); }).catch((e) => { if (runtimeGone(e)) markGone(); });
     refreshWallet();
-  }, [port, applyStatus, refreshWallet]);
+  }, [port, applyStatus, refreshWallet, markGone]);
 
   // A hole in the stream is the transport's fact; which authority answers it is
   // each model's own. The transcript is rebuilt from /history, the run graph
   // from the read the kernel rebuilds — one gap, two different re-reads.
   useEffect(() => {
+    if (gone) return;
     const sub = port.subscribe(
         (ev) => {
           surfaceReplay.observe(ev);
@@ -242,10 +260,10 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       release();
       sub();
     };
-  }, [port, pacer, rt.id, onTurnDone, reloadMcp, rebuild, refreshStatus, revalue, compact.onEvent, compact.release, surfaceReplay.observe]);
+  }, [gone, port, pacer, rt.id, onTurnDone, reloadMcp, rebuild, refreshStatus, revalue, compact.onEvent, compact.release, surfaceReplay.observe]);
   const wantRef = useRef({ visible, busy: running });
-  wantRef.current = { visible, busy: running };
-  useEffect(() => streamBudget.update(rt.id, { visible, busy: running }), [rt.id, visible, running]);
+  wantRef.current = { visible: visible && !gone, busy: running && !gone };
+  useEffect(() => streamBudget.update(rt.id, { visible: visible && !gone, busy: running && !gone }), [rt.id, visible, running, gone]);
 
   // What the rows cover is dispatched before the rows themselves, so the table
   // never spends a frame showing a prefix as if it were the whole record.
@@ -269,13 +287,15 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       if (!alive) return;
       applyStatus(st);
       dispatch(totalsOf(st) as never);
-    }).catch(() => {
-      if (alive) setSessionRead((prev) => prev.kind === "pending" ? { kind: "settled", status: null } : prev);
+    }).catch((e: unknown) => {
+      if (!alive) return;
+      if (runtimeGone(e)) markGone();
+      setSessionRead((prev) => prev.kind === "pending" ? { kind: "settled", status: null } : prev);
     });
     return () => {
       alive = false;
     };
-  }, [port, applyStatus, readHistory, replayTrajectory]);
+  }, [port, applyStatus, readHistory, replayTrajectory, markGone]);
 
   useEffect(() => {
     if (!running) {
@@ -307,11 +327,15 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
       applyStatus(st);
       statusRead();
       dispatch(totalsOf(st) as never);
-    }).catch((e) => { if (current()) fail(e, "status"); });
+    }).catch((e) => {
+      if (!current()) return;
+      if (runtimeGone(e)) markGone();
+      else fail(e, "status");
+    });
     refreshWallet();
     onSessionChanged();
     return history;
-  }, [port, applyStatus, statusRead, refreshWallet, onSessionChanged, replayTrajectory, fail, surfaceReplay.refresh, readHistory]);
+  }, [port, applyStatus, statusRead, refreshWallet, onSessionChanged, replayTrajectory, fail, surfaceReplay.refresh, readHistory, markGone]);
 
   // Both of these read only the user and tool cards, so they key off the
   // revision rather than the items array: a streamed answer leaves every card
@@ -395,7 +419,7 @@ function PaneView({ port, hub, rt, title, active, visible, sideHost, side, onFoc
 
   // /status is the only source for background jobs and for settings the run does
   // not echo, so a live turn has to re-read it rather than infer from events.
-  useStatusPoll(running && visible, refreshStatus);
+  useStatusPoll(running && visible && !gone, refreshStatus);
 
   const { slots, moveSurface, atComposer, inRail } = useSurfaceSlots(port, s.views, notify);
 

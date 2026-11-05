@@ -83,6 +83,22 @@ func (r *Link) Attach(ctx context.Context, host, workspace string) (serve.Remote
 	}, ep.Release, nil
 }
 
+// Resolve reports where a workspace a pane is already on is reachable now.
+// A link whose kernel died with it comes back with a different local address,
+// and a pane created before that has only the old one to ask about.
+func (r *Link) Resolve(host, workspace string) (serve.RemoteEndpoint, bool) {
+	ep, ok := r.pool.Resolve(host, workspace)
+	if !ok {
+		return serve.RemoteEndpoint{}, false
+	}
+	return serve.RemoteEndpoint{
+		Host:      ep.Host,
+		Workspace: ep.Workspace,
+		Addr:      ep.Addr,
+		Token:     ep.Token,
+	}, true
+}
+
 // Browse lists folders over the connection alone. The pool holds the link for
 // a moment afterwards, so walking down a tree is one login rather than one per
 // step — and nothing is installed on the far side to answer it, which is what

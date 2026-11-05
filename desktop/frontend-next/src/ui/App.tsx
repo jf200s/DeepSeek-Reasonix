@@ -53,6 +53,7 @@ import { WallpaperStage } from "./WallpaperStage";import { useAddWorkspace } fro
 import { AddWorkspacePrompt } from "./AddWorkspacePrompt";
 import { PaneTabs } from "./PaneTabs";
 import { paneReader } from "../state/paneread";
+import { mux } from "../port/muxclient";
 import { onShowsSessionTabsChange, showsSessionTabs } from "../state/prefs";
 import { useLiveGrace } from "./useLiveGrace";
 import { isUnread, useViewed, useUnreadBadge } from "./unread";
@@ -374,11 +375,29 @@ export function App({ hub }: { hub: HubPort }) {
   // folder's worth of panes must not pay for that once each.
   const closePanes = useCallback(
     async (ids: string[]) => {
-      for (const id of ids) await hub.close(id);
-      await reloadPanes();
+      try {
+        for (const id of ids) await hub.close(id);
+      } finally {
+        // One close that threw is not a reason to leave every other row live:
+        // the reload is what makes the surviving panes true again.
+        await reloadPanes();
+      }
     },
     [hub, reloadPanes],
   );
+
+  const forgetPane = useCallback(
+    (id: string) => {
+      setRuntimes((cur) => cur.filter((rt) => rt.id !== id));
+      setActive((cur) => (cur === id ? "" : cur));
+      void hub.close(id).catch(() => {});
+    },
+    [hub],
+  );
+
+  // The mux attach is the first call to learn a runtime is gone, before any
+  // status poll or stream retry reaches the same answer.
+  useEffect(() => mux.onTerminal(forgetPane), [forgetPane]);
 
   const openPeerSession = useCallback((path: string) => void openPane({ sessionPath: path }).catch(fail), [openPane, fail]);
 
@@ -685,6 +704,7 @@ export function App({ hub }: { hub: HubPort }) {
                   // session path, and until /runtimes reports it the pane still
                   // looks blank — the next history row would take it over.
                   onSessionChanged={refreshPanes}
+                  onGone={forgetPane}
                   pulse={settingsPulse}
                   findPulse={find.pulse}
                   findTogglePulse={find.togglePulse}

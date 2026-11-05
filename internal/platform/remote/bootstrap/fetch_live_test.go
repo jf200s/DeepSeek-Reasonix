@@ -30,6 +30,7 @@ if [ "$1" = "serve" ] && [ "$2" = "--help" ]; then
   echo "  -token-file string"
   echo "  -port-file string"
   echo "  -pid-file string"
+  echo "  -idle-timeout duration"
   echo "  -provider-broker reasonix remote"
   echo "  -provider-broker-file string"
   echo "  -provider-broker-token-file string"

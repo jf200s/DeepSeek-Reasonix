@@ -1,9 +1,11 @@
 package attach
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 	"slices"
 	"strings"
 	"sync"
@@ -338,5 +340,46 @@ func TestAScratchDirectoryThatIsNotPrivateIsRefusedWithATypedError(t *testing.T)
 	}).ExecDetached(t.Context(), "serve")
 	if !errors.Is(err, ErrUnsafeScratch) {
 		t.Fatalf("ExecDetached = %v, want ErrUnsafeScratch", err)
+	}
+}
+
+// Closing a link ends the session, not the kernel: the kernel outlives the link
+// so a reconnect can reuse it, and Close says so instead of pretending the
+// distribution ended it. The link still reports Stopped for itself.
+func TestClosingAWSLLinkLeavesTheKernelRunningAndSaysSo(t *testing.T) {
+	m := &wslMachine{t: t, started: make(chan struct{}, 4)}
+	l, err := m.link(wslEntry())
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mu sync.Mutex
+	var seen []remote.Status
+	l.Subscribe(func(ev remote.StatusEvent) { mu.Lock(); seen = append(seen, ev.Status); mu.Unlock() })
+	if err := l.Start(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	<-m.started
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, &slog.HandlerOptions{Level: slog.LevelInfo})))
+	defer slog.SetDefault(previous)
+
+	if err := l.Close(); err != nil {
+		t.Fatal(err)
+	}
+	note := logs.String()
+	if !strings.Contains(note, "kernel kept running for reconnect") || !strings.Contains(note, "reasonix remote stop dev") {
+		t.Fatalf("close did not say the kernel was kept: %q", note)
+	}
+	mu.Lock()
+	defer mu.Unlock()
+	if !slices.Equal(seen, []remote.Status{remote.StatusConnecting, remote.StatusConnected, remote.StatusStopped}) {
+		t.Fatalf("states = %v, want the link's own Stopped", seen)
+	}
+	for _, c := range m.calls {
+		if strings.Contains(strings.Join(c, " "), "kill -TERM") {
+			t.Fatalf("closing the link stopped the kernel: %v", c)
+		}
 	}
 }

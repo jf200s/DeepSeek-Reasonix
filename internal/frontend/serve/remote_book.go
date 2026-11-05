@@ -90,12 +90,15 @@ func (h *Hub) saveRemoteHost(w http.ResponseWriter, r *http.Request) {
 	}
 	err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
 		// Editing an entry must not drop the forwards it carries: they are set
-		// from the CLI and have no control on this page to put them back.
+		// from the CLI and have no control on this page to put them back. The
+		// idle timeout is the same story: the form does not show it, so a save
+		// leaves the row's own setting alone.
 		if existing, ok := c.RemoteHost(name); ok {
 			if existing.HostKind() != config.RemoteKindSSH || strings.TrimSpace(body.Distro) != "" {
 				return nil, errRemoteKind
 			}
 			entry.Forwards = append([]config.RemoteForwardEntry(nil), existing.Forwards...)
+			entry.IdleTimeoutMinutes = existing.IdleTimeoutMinutes
 		}
 		return nil, c.UpsertRemoteHost(entry)
 	})
@@ -362,7 +365,7 @@ func (h *Hub) remoteLink(r *http.Request, host string) (RemoteEndpoint, func(), 
 	if err != nil {
 		return RemoteEndpoint{}, nil, err
 	}
-	if ep, ok := h.remotePane(host, workspace); ok {
+	if ep, ok := h.remoteEndpointNow(host, workspace); ok {
 		return ep, func() {}, nil
 	}
 	ep, release, err := h.opts.Remote.Attach(operationContext(r), host, workspace)
@@ -376,6 +379,18 @@ func (h *Hub) remoteLink(r *http.Request, host string) (RemoteEndpoint, func(), 
 		}
 		time.AfterFunc(remoteLinkLinger, release)
 	}, nil
+}
+
+// remoteEndpointNow is an endpoint on host whose address is the one in force
+// now, not the one a pane was opened on. A link that came back relaunches its
+// kernel, and the pane still records the old local port.
+func (h *Hub) remoteEndpointNow(host, workspace string) (RemoteEndpoint, bool) {
+	if resolver, ok := h.opts.Remote.(RemoteResolver); ok {
+		if ep, ok := resolver.Resolve(host, workspace); ok {
+			return ep, true
+		}
+	}
+	return h.remotePane(host, workspace)
 }
 
 // remoteHostWorkspace resolves the user-held default before a link can be taken.
@@ -394,11 +409,28 @@ func (h *Hub) remoteHostWorkspace(name string) (string, error) {
 	return entry.DefaultWorkspace(), nil
 }
 
+// remotePane finds a pane already open on host at workspace. A Windows-form
+// folder is matched by host alone: the kernel answers in its own /mnt spelling,
+// and that machine's hub speaks for every pane on it. A folder in the remote's
+// own spelling still has to match, so a read never quietly answers for a
+// different folder.
 func (h *Hub) remotePane(host, workspace string) (RemoteEndpoint, bool) {
+	var other RemoteEndpoint
+	var found bool
 	for _, rt := range h.Runtimes() {
-		if ep, ok := rt.Remote(); ok && ep.Host == host && ep.Workspace == workspace {
+		ep, ok := rt.Remote()
+		if !ok || ep.Host != host {
+			continue
+		}
+		if ep.Workspace == workspace {
 			return ep, true
 		}
+		if !found {
+			other, found = ep, true
+		}
+	}
+	if found && wsl.IsWindowsPath(workspace) {
+		return other, true
 	}
 	return RemoteEndpoint{}, false
 }
@@ -427,8 +459,13 @@ func (h *Hub) saveWSLHost(w http.ResponseWriter, name string, body RemoteHostEdi
 		Disabled:     body.Disabled,
 	}
 	err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
-		if existing, ok := c.RemoteHost(name); ok && existing.HostKind() != config.RemoteKindWSL {
-			return nil, errRemoteKind
+		if existing, ok := c.RemoteHost(name); ok {
+			if existing.HostKind() != config.RemoteKindWSL {
+				return nil, errRemoteKind
+			}
+			// This form has no idle-timeout control, so a save leaves the row's
+			// own setting as it was.
+			entry.IdleTimeoutMinutes = existing.IdleTimeoutMinutes
 		}
 		return nil, c.UpsertRemoteHost(entry)
 	})

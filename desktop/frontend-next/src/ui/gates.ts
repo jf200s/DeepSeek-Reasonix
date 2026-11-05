@@ -1,8 +1,13 @@
 import { useCallback } from "react";
 import type { ActionDispatch } from "react";
-import type { AgentPort, ApprovalVerdict } from "../port/port";
+import { DeliveryError, HttpError, type AgentPort, type ApprovalVerdict } from "../port/port";
 import type { PlanAction } from "../port/session";
 import type { SessionEvent } from "../state/session";
+
+// "unconfirmed" is the one answer the card has to render itself: the kernel may
+// have taken the decision, so nothing settles until a receipt or a status read
+// says which happened.
+export type GateOutcome = "unconfirmed" | void;
 
 interface Inputs {
   port: AgentPort;
@@ -12,36 +17,67 @@ interface Inputs {
   onRevise: () => void;
 }
 
+// A duplicate answer to a decision the kernel already settled is success seen
+// from the losing side: another window or an earlier attempt got there first.
+// Reporting it as a failure would leave the person retrying a closed gate.
+function alreadySettled(e: unknown): boolean {
+  if (!(e instanceof HttpError)) return false;
+  if (e.status === 409) return e.reason?.code === "plan.decision_stale" || e.reason?.code === "surface.expired";
+  return e.status === 404 && e.reason?.code === "ask.not_found";
+}
+
 /** What a card sitting at a gate can answer with. Each of these settles one
  *  kernel decision and then re-reads the projection rather than patching it,
  *  because the answer that lands is the kernel's, not this one's. */
 export function useGateActions({ port, dispatch, refreshStatus, fail, onRevise }: Inputs) {
+  // The ack timeout cannot say whether a decision landed, so one unconfirmed
+  // send is retried; a refusal the kernel did answer is final and is not sent
+  // again. A duplicate answer means it landed already, so neither path reports
+  // it as a failure.
+  const decide = useCallback(
+    async (send: () => Promise<void>, rethrow = false, retryable = true): Promise<GateOutcome> => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await send();
+          return;
+        } catch (e) {
+          if (alreadySettled(e)) {
+            refreshStatus();
+            return;
+          }
+          if (retryable && e instanceof DeliveryError && attempt === 0) continue;
+          // The kernel may have applied the decision without answering it, so
+          // the projection is re-read even though this attempt failed.
+          fail(e);
+          refreshStatus();
+          if (rethrow) throw e;
+          return e instanceof DeliveryError ? "unconfirmed" : undefined;
+        }
+      }
+    },
+    [fail, refreshStatus],
+  );
+
   // Transcript rows are memoised on their item; a callback rebuilt every render
   // would defeat that on the two cards that take one.
   const onApprove = useCallback(
-    async (itemId: string, id: string, v: ApprovalVerdict) => {
-      try {
+    async (itemId: string, id: string, v: ApprovalVerdict) =>
+      decide(async () => {
         await port.approve(id, v);
         dispatch({ kind: "__decided", id: itemId, verdict: v } as never);
         refreshStatus();
-      } catch (e) {
-        fail(e);
-      }
-    },
-    [port, refreshStatus, fail],
+      }),
+    [port, dispatch, refreshStatus, decide],
   );
 
   const onFullAccess = useCallback(
-    async (itemId: string) => {
-      try {
+    async (itemId: string) =>
+      decide(async () => {
         await port.setApprovalMode("yolo");
         dispatch({ kind: "__decided", id: itemId, verdict: "yolo" } as never);
         refreshStatus();
-      } catch (e) {
-        fail(e);
-      }
-    },
-    [port, refreshStatus, fail],
+      }),
+    [port, dispatch, refreshStatus, decide],
   );
 
   // The plan gate has three outcomes the kernel keeps apart, and only one of
@@ -52,23 +88,20 @@ export function useGateActions({ port, dispatch, refreshStatus, fail, onRevise }
   // why the chat TUI clears it here too. Studio never did, so approving a plan
   // executed it and then planned the next turn all over again.
   const onPlan = useCallback(
-    async (itemId: string, id: string, action: PlanAction) => {
-      // The three outcomes are three kernel transitions, so they go back whole
-      // rather than as an allow/deny pair. The kernel moves the lifecycle
-      // itself — setting plan mode from here would race its own transition — and
-      // a stale decision is ordinary concurrency: say so, then re-read the
-      // projection instead of binding this answer to whatever is open now.
-      try {
+    async (itemId: string, id: string, action: PlanAction) =>
+      decide(async () => {
+        // The three outcomes are three kernel transitions, so they go back whole
+        // rather than as an allow/deny pair. The kernel moves the lifecycle
+        // itself — setting plan mode from here would race its own transition —
+        // and a stale decision is ordinary concurrency, which decide() treats as
+        // already settled rather than binding this answer to whatever is open.
         await port.planDecision(id, action);
         dispatch({ kind: "__decided", id: itemId, verdict: action } as never);
         refreshStatus();
         // Revising is done by talking, so put the cursor where the talking happens.
         if (action === "revise") onRevise();
-      } catch (e) {
-        fail(e);
-      }
-    },
-    [port, refreshStatus, fail],
+      }),
+    [port, dispatch, refreshStatus, onRevise, decide],
   );
 
   // Taking it back is only cheap while the conversation that caused it is still
@@ -96,27 +129,20 @@ export function useGateActions({ port, dispatch, refreshStatus, fail, onRevise }
 
   const onExtSubmit = useCallback(
     async (pluginId: string, surfaceId: string, values: Record<string, unknown>) => {
-      try {
-        await port.submitExtensionForm(pluginId, surfaceId, values);
-      } catch (e) {
-        fail(e);
-        throw e;
-      }
+      // Not a decision gate: the plugin's own action may not be idempotent, so
+      // a send that timed out is reported rather than repeated.
+      await decide(() => port.submitExtensionForm(pluginId, surfaceId, values), true, false);
     },
-    [port, fail],
+    [port, decide],
   );
 
   const onAnswer = useCallback(
-    async (itemId: string, id: string, answers: { questionId: string; selected: string[]; value?: Record<string, unknown> }[]) => {
-      try {
+    async (itemId: string, id: string, answers: { questionId: string; selected: string[]; value?: Record<string, unknown> }[]) =>
+      decide(async () => {
         await port.answer(id, answers);
         dispatch({ kind: "__decided", id: itemId, answers: answers.map((a) => a.selected), values: answers.find(a => a.value !== undefined)?.value } as never);
-      } catch (e) {
-        fail(e);
-        if (answers.some(a => a.value !== undefined)) throw e;
-      }
-    },
-    [port, fail],
+      }, answers.some(a => a.value !== undefined)),
+    [port, dispatch, decide],
   );
   return { onApprove, onFullAccess, onPlan, onForget, onExtInvoke, onExtSubmit, onAnswer };
 }

@@ -189,6 +189,31 @@ tool_timeout_seconds = { "generate_video" = 1800 }   # 可选：raw MCP tool 名
 
 完整 schema 与每个字段的契约见 [`SPEC.md` §5](./SPEC.md#5-configuration-toml)。
 
+### 程序化工具调用（`run_code`）
+
+`[tools.ptc]` 是**仅用户配置文件**：项目里的 `reasonix.toml` 既不能开启它，也不能改它的上限。
+开启 `enabled = true` 后，模型可以写一段简短的同步 JavaScript 程序来调用其它工具；只有程序
+`log` 的内容和返回值会进入对话，因此多个有依赖的步骤只需一次往返。程序本身没有文件和网络
+访问，也不能导入模块；标准 JavaScript 内建对象可用，包括 `Date` 和 `Math`（真实时钟和随机数）。
+它是同步的——`await` 和 Promise 会被拒绝——程序内也不能再调用 `run_code`。程序里的每次调用
+都和直接调用一样经过审批、hook 和观测。`tools.parallel(calls, concurrency?)` 只并发执行
+**只读**工具；写工具请按顺序调用。`exclusive`（默认 `true`）会向模型隐藏其它所有工具，让所有
+工具工作都经过 `run_code`；设为 `false` 则保留旁边的直接工具。
+
+单个程序的上限：墙钟时间默认 120 秒，最多 600 秒；`max_parallel` 默认 8，最多 16；
+`max_calls` 默认 100 次宿主工具调用；程序源码和输出各 64KiB。这些字段设为 0 时保持默认值。
+
+```toml
+[tools.ptc]              # 仅用户配置文件
+enabled = true
+exclusive = true         # 向模型隐藏其它所有工具，所有调用都经过 run_code
+timeout_seconds = 120    # 单个程序的墙钟时间；运行时上限 600 秒
+max_calls = 100          # 单个程序允许的宿主工具调用次数
+max_program_bytes = 65536   # 64KiB
+max_output_bytes = 65536    # 64KiB
+max_parallel = 8         # tools.parallel 对只读工具的并发数；运行时上限 16
+```
+
 启动工具摘要会复用当前 Reasonix 数据目录中仍可信的快照，有效期为 24 小时。其他数据目录
 刷新探测结果不会替换这份有效快照。快照过期后，临时探测失败会保留先前的成功记录，让系统
 前缀在运行时重建和应用重启之间保持稳定；工具被移除等确定性变化会在刷新时生效。
@@ -301,6 +326,10 @@ reasonix web
 因此多个 Web 实例可以共用同一个 Reasonix home，而不会相互覆盖登记状态。服务保持在前台运行，
 按 Ctrl-C 停止。
 
+`serve` 和 `web` 还接受 `--idle-timeout`：`-1`（默认）表示不因空闲退出，`0` 表示没有在途请求时
+立即退出，`15m` 这样的时长表示空闲这么久后退出。由 `remote connect` 启动的内核通过该开关获得
+主机的空闲策略（包括 WSL 默认的 10 分钟）。
+
 显式传入 `reasonix web --auth none` 可以关闭默认 Token，只应在监听地址确定可信时使用。
 `reasonix serve` 在未配置 `[serve].auth_mode` 且未传 `--auth` 时，同样默认使用每次启动新生成的 Token。
 
@@ -383,6 +412,7 @@ Studio 的主机级读取与未指定目录的打开，共用该主机显式配�
 
 ```toml
 [remote]
+# idle_timeout_minutes = 10       # 可选：内核空闲这么久后退出，-1..1440 分钟（0 = 立即，-1 = 永不）；WSL 默认 10 分钟，SSH 未显式配置时永不退出；单台主机可覆盖
 [[remote.hosts]]
 name          = "gpu-box"
 host          = "203.0.113.7"
@@ -400,25 +430,30 @@ target = "127.0.0.1:5432"
 
 Windows 电脑上的 WSL 发行版也是一台主机，写作 `kind = "wsl"` 加一个 `distro`（可用 `reasonix remote wsl list` 查看）：
 
-- 它没有地址，所以只接受目录和安装相关的字段。在它上面写 `host`、`port`、`user`、密钥、密码、
-  `proxy_jump`、`use_ssh_config` 或转发都会被拒绝。
+- 它没有地址，所以只接受目录、安装、provider 和空闲超时字段。在它上面写 `host`、`port`、`user`、
+  密钥、密码、`proxy_jump`、`use_ssh_config` 或转发都会被拒绝。
 - 在 **设置 → 远程** 里添加：只有装了 WSL 的机器才会出现「WSL 发行版」选项，并列出它的发行版
   （WSL 1 的发行版显示为不可选）。之后 Studio 像打开列表里其他机器一样打开它。
 - 连接需要 WSL 2，且发行版里有 `ps`
   和 `nohup`；缺少它们的精简镜像会被拒绝，并说明缺的是哪一个。
-- 内核运行在 Studio 保持打开的一个 shell 会话里，因为会话结束时 WSL 会结束它启动的所有进程。
-  - Studio 关闭连接后，内核随发行版一起退出（空闲的发行版大约 15 秒后会被 WSL 停止）。
+- 内核是被刻意保活的，重连时直接复用，而不是重新冷启动。它不依附于 Studio 打开的那个 shell 会话：
+  关闭连接后它仍继续服务。
+  - 它会按内核的空闲超时自行退出：默认 10 分钟。可在 `[remote]` 或单台主机上设置
+    `idle_timeout_minutes`（`-1..1440` 分钟；`0` 表示一空闲就退出，`-1` 表示永不退出）。
+    SSH 主机未显式配置时不会因空闲退出。
+  - 用 `reasonix remote stop <主机>` 可立即停止。
   - 对话保存在磁盘上，下次连接时继续。
-  - 不会有任何东西在你不知情时让发行版一直运行。
 - 模型凭据来自发行版自己的配置（`provider = "remote"`）：在 WSL 默认的网络模式下，发行版访问不到
   本机的回环地址，所以不共享本机的 provider。
 - 以 Windows 路径选择的目录（`C:\work\app` 或 `\\wsl.localhost\<distro>\home\me\app`）由发行版转换；
   它看不到的目录会被拒绝。
 - 命令行下用 `reasonix remote wsl add <名字> <发行版>` 添加，之后 `remote test` 和
   `remote connect` 的用法与 SSH 主机相同。
-  - `connect` 会一直保持会话，直到你按 Ctrl-C，内核随之停止。
+  - `connect` 会一直保持会话，直到你按 Ctrl-C；之后内核继续运行，直到空闲超时（默认 10 分钟）
+    或你执行 `reasonix remote stop`。
   - `status`、`forward`、`serve` 和 `fs` 仍只支持 SSH，对 WSL 机器会以
-    `remote: host is not reached over ssh` 拒绝。
+    `remote: host is not reached over ssh` 拒绝。`remote stop` 不限于 SSH：它也能停止 WSL 内核，
+    且不需要打开会话。
 
 由 agent 自己执行的 shell 命令里，只有 `list`、`help` 和 `wsl list|test` 能运行：
 
@@ -433,6 +468,7 @@ reasonix remote add gpu-box dev@203.0.113.7 --workspace '~/projects/app'
 reasonix remote import --all              # 导入别名；连接时通过 ssh -G 解析 Include/Match 等规则
 reasonix remote test gpu-box              # 拨号 + 认证 + 主机密钥确认
 reasonix remote connect gpu-box --open    # 引导 serve、建隧道、打开 URL
+reasonix remote stop gpu-box              # 立即停止该内核（SSH 或 WSL）
 reasonix remote serve status gpu-box
 reasonix remote fs ls gpu-box:'~/projects/app'
 ```
@@ -443,7 +479,8 @@ reasonix remote fs ls gpu-box:'~/projects/app'
 
 `connect` 是前台守护(相当于 `ssh -N` 加上 serve 引导):它保持隧道与已配置的转发存活,断线时
 以指数退避自动重连,并在重连后重新挂载转发。Ctrl-C 只断开本地一侧 —— 远端 serve 继续运行,
-下次 `connect` 会复用它。V1 无后台守护进程。
+下次 `connect` 会复用它;只有空闲超时触发(WSL 内核默认 10 分钟)或执行 `reasonix remote stop`
+才会退出。V1 无后台守护进程。
 
 主机密钥会对照你的 OpenSSH `~/.ssh/known_hosts`(只读)以及 Reasonix 托管的
 `~/.reasonix/remote/known_hosts` 校验。首次见到的密钥会提示 TOFU 确认并记入托管文件;与已记录
@@ -498,7 +535,11 @@ Serve。认证失败或主机密钥错误属于终止性故障，此时会关闭
 
 ### 远端 serve 的生命周期
 
-- 主机上的 `reasonix serve` 进程是常驻的。退出桌面或链路断开都不会终止它,下次连接会直接接入。
+- 主机上的 `reasonix serve` 进程比桌面和链路活得久:退出桌面或断开链路都不会终止它,重连会
+  直接接入。SSH 内核一直运行到执行 `reasonix remote stop <主机>`(或
+  `reasonix remote serve stop <主机>`);若在 `[remote]` 或单台主机上设置了
+  `idle_timeout_minutes`(`-1..1440` 分钟),则改为空闲该时长后退出(`0` 立即,`-1` 永不)。
+  WSL 内核默认 10 分钟；SSH 内核未显式配置时不会因空闲退出。
 - pane 在这个 serve 上的会话不会比桌面活得久。每个 pane 在远端各自驱动一个 runtime;关闭 pane
   或退出桌面时,Studio 会先向远端 serve 发 `POST /runtimes/{id}/close`,再拆隧道。
 - 这次关闭会取消进行中的回合并释放会话租约,别的窗口随后就能打开这个会话。被关闭的只有该 pane

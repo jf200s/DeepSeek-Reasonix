@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"os"
 	"reasonix/internal/base/secrets"
@@ -15,6 +16,8 @@ import (
 	"reasonix/internal/platform/remote"
 	"reasonix/internal/platform/remote/bootstrap"
 	"reasonix/internal/platform/remote/sftpfs"
+	"reasonix/internal/platform/remote/wslconn"
+	"reasonix/internal/platform/wsl"
 )
 
 // remoteCommand dispatches `reasonix remote <sub>`, mirroring mcpCommand.
@@ -48,6 +51,8 @@ func remoteCommand(args []string, version string) int {
 		return remoteForwardCLI(args[1:])
 	case "serve":
 		return remoteServeCLI(args[1:], version)
+	case "stop":
+		return remoteStopCLI(args[1:])
 	case "fs":
 		return remoteFSCLI(args[1:])
 	case "attach-workspace":
@@ -121,6 +126,19 @@ func editUserConfig(mutate func(*config.Config) error) error {
 
 const remoteAddUsage = "usage: reasonix remote add <name> [user@]host[:port] [flags]"
 
+// flagWasSet reports whether name was given on the command line. Needed for a
+// value whose zero is meaningful: --idle-timeout 0 exits at once, so absence
+// cannot be read off the parsed value.
+func flagWasSet(fs *flag.FlagSet, name string) bool {
+	set := false
+	fs.Visit(func(f *flag.Flag) {
+		if f.Name == name {
+			set = true
+		}
+	})
+	return set
+}
+
 func remoteAddCLI(args []string) int {
 	// Positionals come first (name, target); Go's flag package stops at the
 	// first non-flag argument, so the flags are parsed from what follows.
@@ -139,10 +157,20 @@ func remoteAddCLI(args []string) int {
 	workspace := fs.String("workspace", "", "default remote workspace directory")
 	useSSHConfig := fs.Bool("use-ssh-config", false, "layer ~/.ssh/config values under unset fields")
 	serveInstall := fs.String("serve-install", "auto", "remote CLI install strategy: auto|npm|upload|never")
+	// The flag has no single default to advertise: an unconfigured SSH host is
+	// never idle-exited, while a WSL distribution exits after 10 minutes. Only a
+	// value given on the command line is recorded, so the flag default stays 0
+	// and the help text names both kinds' behaviour.
+	idleTimeout := fs.Int("idle-timeout", 0, "minutes a kernel may sit idle before it exits (0 = at once, -1 = never; default: WSL 10, SSH never)")
 	passphraseEnv := fs.String("passphrase-env", "", "env var name holding the key passphrase")
 	passwordEnv := fs.String("password-env", "", "env var name holding the login password")
 	if code, ok := parseCommandFlags(fs, args[2:]); !ok {
 		return code
+	}
+	var idle *int
+	idleSet := flagWasSet(fs, "idle-timeout")
+	if idleSet {
+		idle = idleTimeout
 	}
 	user, host, port, err := remote.ParseTarget(target)
 	if err != nil {
@@ -150,21 +178,27 @@ func remoteAddCLI(args []string) int {
 		return 2
 	}
 	entry := config.RemoteHostEntry{
-		Name:          name,
-		Host:          host,
-		Port:          port,
-		User:          user,
-		IdentityFile:  *identity,
-		ProxyJump:     *jump,
-		Workspace:     *workspace,
-		ServeInstall:  *serveInstall,
-		UseSSHConfig:  *useSSHConfig,
-		PassphraseEnv: *passphraseEnv,
-		PasswordEnv:   *passwordEnv,
+		Name:               name,
+		Host:               host,
+		Port:               port,
+		User:               user,
+		IdentityFile:       *identity,
+		ProxyJump:          *jump,
+		Workspace:          *workspace,
+		ServeInstall:       *serveInstall,
+		UseSSHConfig:       *useSSHConfig,
+		PassphraseEnv:      *passphraseEnv,
+		PasswordEnv:        *passwordEnv,
+		IdleTimeoutMinutes: idle,
 	}
 	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
 		var removalCandidates []string
 		if existing, ok := c.RemoteHost(entry.Name); ok {
+			// Re-adding a host replaces the row whole. The flag's absence means
+			// "leave it as it was", not "go back to the global default".
+			if !idleSet {
+				entry.IdleTimeoutMinutes = existing.IdleTimeoutMinutes
+			}
 			for _, key := range []string{existing.PasswordEnv, existing.PassphraseEnv} {
 				if config.IsGeneratedRemoteCredential(entry.Name, key) {
 					removalCandidates = append(removalCandidates, key)
@@ -283,6 +317,7 @@ func remoteImportCLI(args []string) int {
 				entry.Workspaces = append([]string(nil), existing.Workspaces...)
 				entry.ServeInstall = existing.ServeInstall
 				entry.Forwards = append([]config.RemoteForwardEntry(nil), existing.Forwards...)
+				entry.IdleTimeoutMinutes = existing.IdleTimeoutMinutes
 			}
 			if err := c.UpsertRemoteHost(entry); err != nil {
 				return nil, err
@@ -424,22 +459,162 @@ func printRemoteReport(rep bootstrap.Report) {
 	fmt.Println("not ready — install reasonix on that machine, or open one of the routes above")
 }
 
+// remoteStopUsage: stop the kernel on one machine now.
+const remoteStopUsage = "usage: reasonix remote stop <name>"
+
+// buildWSLStopConn opens a one-shot connection to a WSL distribution for a
+// command that needs no attach link. A variable so a test can substitute a
+// fake distribution without wsl.exe.
+var buildWSLStopConn = func(ctx context.Context, entry config.RemoteHostEntry) (wslStopConn, error) {
+	c, err := wslconn.New(ctx, wsl.System(), wsl.SystemCommand(), entry.Distro)
+	if err != nil {
+		return nil, err
+	}
+	return c, nil
+}
+
+// wslStopConn is a distribution reached for its kernel's files and state: the
+// bootstrap's own view plus the path translation a configured Windows folder
+// needs before it names the state that kernel wrote.
+type wslStopConn interface {
+	bootstrap.Conn
+	ToLinux(ctx context.Context, p string) (string, error)
+}
+
+// remoteStopCLI stops the kernel Reasonix started on one machine, whether it
+// was reached over SSH or as a WSL distribution. It is deliberately not in
+// remoteReadOnly: the kernel is a process on that machine.
+func remoteStopCLI(args []string) int {
+	if commandHelpRequested(args, 2) {
+		fmt.Fprintln(os.Stdout, remoteStopUsage)
+		return 0
+	}
+	if len(args) != 1 {
+		fmt.Fprintln(os.Stderr, remoteStopUsage)
+		return 2
+	}
+	name := args[0]
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	entry, ok := cfg.RemoteHost(name)
+	if !ok {
+		fmt.Fprintf(os.Stderr, "no remote host named %q\n", name)
+		return 1
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	if entry.HostKind() == config.RemoteKindWSL {
+		return remoteStopWSLKernels(ctx, entry)
+	}
+	client, cleanup, err := buildRemoteClient(name)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	defer cleanup()
+	if err := client.Start(ctx); err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return 1
+	}
+	defer client.Close()
+	return remoteStopKernels(ctx, entry, func(ws string) (bootstrap.ServeState, bool, error) {
+		return bootstrap.Status(ctx, client, ws)
+	}, func(ws string) error {
+		return bootstrap.Stop(ctx, client, ws)
+	})
+}
+
+// remoteStopWSLKernels stops every kernel this machine's book records for a
+// distribution. No anchor is opened: the state file under the distribution's
+// home and the process it names are all Stop reads.
+func remoteStopWSLKernels(ctx context.Context, entry config.RemoteHostEntry) int {
+	conn, err := buildWSLStopConn(ctx, entry)
+	if err != nil {
+		return wslFailure(err)
+	}
+	// The kernel recorded the workspace as the distribution spells it, so a
+	// Windows path has to be translated the same way an attach translates it.
+	mapped := func(ws string) (string, error) {
+		if !wsl.IsWindowsPath(ws) {
+			return ws, nil
+		}
+		return conn.ToLinux(ctx, ws)
+	}
+	return remoteStopKernels(ctx, entry, func(ws string) (bootstrap.ServeState, bool, error) {
+		dir, err := mapped(ws)
+		if err != nil {
+			return bootstrap.ServeState{}, false, err
+		}
+		return bootstrap.Status(ctx, conn, dir)
+	}, func(ws string) error {
+		dir, err := mapped(ws)
+		if err != nil {
+			return err
+		}
+		return bootstrap.Stop(ctx, conn, dir)
+	})
+}
+
+// remoteStopKernels stops one kernel per workspace and reports each. A host
+// with no folder configured recorded its kernel at the login home, which is
+// exactly what an empty workspace means to the bootstrap.
+func remoteStopKernels(ctx context.Context, entry config.RemoteHostEntry, status func(string) (bootstrap.ServeState, bool, error), stop func(string) error) int {
+	workspaces := entry.WorkspaceList()
+	if len(workspaces) == 0 {
+		workspaces = []string{""}
+	}
+	code := 0
+	for _, ws := range workspaces {
+		st, alive, err := status(ws)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			code = 1
+			continue
+		}
+		if err := stop(ws); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			code = 1
+			continue
+		}
+		label := ""
+		if len(workspaces) > 1 {
+			if strings.TrimSpace(ws) == "" {
+				ws = "~"
+			}
+			label = ws + ": "
+		}
+		// A recorded pid that is not our serve is a stale record, not a kernel
+		// this command just stopped: Stop removes the state, and saying so is
+		// what keeps the report from claiming a process it never signalled.
+		if alive && st.PID > 0 {
+			fmt.Printf("%skernel stopped (pid %d)\n", label, st.PID)
+		} else {
+			fmt.Printf("%sno kernel running\n", label)
+		}
+	}
+	return code
+}
+
 func remoteUsage() {
 	fmt.Println(`Manage remote SSH hosts and their persistent serve (user-global config).
 
 Usage:
   reasonix remote add <name> [user@]host[:port] [--identity F] [--jump SPEC]
                      [--workspace PATH] [--use-ssh-config] [--serve-install auto|npm|upload|never]
-                     [--passphrase-env NAME] [--password-env NAME]
+                     [--idle-timeout MINUTES] [--passphrase-env NAME] [--password-env NAME]
   reasonix remote list
   reasonix remote remove <name>
   reasonix remote import [alias...|--all]      # from ~/.ssh/config
   reasonix remote test <name|user@host>        # dial, auth, host key, and whether a kernel can run there
   reasonix remote wsl list | wsl test <distribution>   # WSL distributions on this Windows machine
-  reasonix remote wsl add <name> <distribution> [--workspace PATH] [--serve-install MODE]   # connect/test/open then work on it
+  reasonix remote wsl add <name> <distribution> [--workspace PATH] [--serve-install MODE] [--idle-timeout MINUTES]   # connect/test/open then work on it
   reasonix remote connect <name> [--workspace PATH] [--local-port N] [--no-serve] [--open] [--forward-only]
   reasonix remote open <name>                  # connect --open
   reasonix remote status [<name>]
+  reasonix remote stop <name>                  # stop that machine's kernel now (SSH or WSL)
   reasonix remote forward add <host> (-L|-R) <spec> | forward rm <host> <name> | forward ls <host>
   reasonix remote serve start|stop|status|logs <name> [--workspace PATH] [-n N]
   reasonix remote fs ls <name>:<path> | fs get <name>:<remote> [local] | fs put <local> <name>:<remote>`)

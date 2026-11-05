@@ -15,6 +15,7 @@ import { AskCard } from "./cards/AskCard";
 import { revealNested } from "./cards/nestreveal";
 import { SurfaceCard, surfaceTool } from "./surface/SurfaceCard";
 import { ElicitCard } from "./cards/ElicitCard";
+import type { GateOutcome } from "./gates";
 import { SayCard, type ReplyActions } from "./cards/SayCard";
 import { DeliveryCard } from "./document/DeliveryCard";
 import { deliveriesByReply } from "./document/deliveries";
@@ -58,10 +59,10 @@ interface Props {
   focus: { call: string; n: number } | null;
   find?: { id: string; nth: number; n: number; mode?: { regex?: boolean; caseSensitive?: boolean } } | null;
   query?: string;
-  onApprove: (itemId: string, id: string, v: ApprovalVerdict) => Promise<void>;
-  onFullAccess: (itemId: string) => Promise<void>;
-  onPlan: (itemId: string, id: string, action: PlanAction) => Promise<void>;
-  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[]; value?: Record<string, unknown> }[]) => Promise<void>;
+  onApprove: (itemId: string, id: string, v: ApprovalVerdict) => Promise<GateOutcome>;
+  onFullAccess: (itemId: string) => Promise<GateOutcome>;
+  onPlan: (itemId: string, id: string, action: PlanAction) => Promise<GateOutcome>;
+  onAnswer: (itemId: string, id: string, answers: { questionId: string; selected: string[]; value?: Record<string, unknown> }[]) => Promise<GateOutcome>;
   onForget: (itemId: string, name: string) => void;
   onSettings?: (at?: string) => void;
   // Takes a still-queued line back. Only rows the kernel has given an

@@ -290,6 +290,51 @@ func TestEditingAHostKeepsForwardsThePageCannotSee(t *testing.T) {
 	}
 }
 
+// The settings page has no idle-timeout control, so a save must not reset the
+// per-host value `remote add --idle-timeout` wrote. Both save paths replace the
+// row whole, so each has to carry the field forward itself.
+func TestRemoteHostSaveKeepsTheIdleTimeoutThePageCannotSee(t *testing.T) {
+	front := bookServer(t, &stubAttacher{})
+	zero := 0
+	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
+		return nil, c.UpsertRemoteHost(config.RemoteHostEntry{
+			Name: "gpu-box", Host: "10.0.0.4", IdleTimeoutMinutes: &zero,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := bookPost(t, front, "/remotes", `{"name":"gpu-box","host":"10.0.0.9"}`).StatusCode; got != http.StatusNoContent {
+		t.Fatalf("edit = %d, want 204", got)
+	}
+	entry := bookEntry(t, "gpu-box")
+	if entry.Host != "10.0.0.9" {
+		t.Fatalf("the edit did not land: %+v", entry)
+	}
+	if entry.IdleTimeoutMinutes == nil || *entry.IdleTimeoutMinutes != 0 {
+		t.Fatalf("the edit dropped the idle timeout: %v", entry.IdleTimeoutMinutes)
+	}
+
+	// WSL saves through a different branch, so it gets the same round trip.
+	never := -1
+	if err := config.EditUserConfigWithCredentials(func(c *config.Config) ([]config.CredentialChange, error) {
+		return nil, c.UpsertRemoteHost(config.RemoteHostEntry{
+			Name: "dev", Kind: config.RemoteKindWSL, Distro: "Ubuntu", IdleTimeoutMinutes: &never,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got := bookPost(t, front, "/remotes", `{"name":"dev","kind":"wsl","distro":"Ubuntu","workspace":"/home/me/app"}`).StatusCode; got != http.StatusNoContent {
+		t.Fatalf("wsl edit = %d, want 204", got)
+	}
+	dev := bookEntry(t, "dev")
+	if dev.Workspace != "/home/me/app" {
+		t.Fatalf("the wsl edit did not land: %+v", dev)
+	}
+	if dev.IdleTimeoutMinutes == nil || *dev.IdleTimeoutMinutes != -1 {
+		t.Fatalf("the wsl edit dropped the idle timeout: %v", dev.IdleTimeoutMinutes)
+	}
+}
+
 // The far machine's own workspace list. With no pane open the read takes a link
 // for itself and gives it back, so the book of a machine that is not connected
 // can still be listed, and listing it opens nothing.

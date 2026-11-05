@@ -88,3 +88,32 @@ func TestRestrictedProxyRefusesInspectOfUnauthorizedID(t *testing.T) {
 		}
 	}
 }
+
+// visTool is the smallest Tool a visibility test needs.
+type visTool struct{ name string }
+
+func (v visTool) Name() string                                             { return v.name }
+func (v visTool) Description() string                                      { return v.name }
+func (v visTool) Schema() json.RawMessage                                  { return json.RawMessage(`{"type":"object"}`) }
+func (v visTool) Execute(context.Context, json.RawMessage) (string, error) { return "", nil }
+func (v visTool) ReadOnly() bool                                           { return true }
+
+// An exclusive program surface is a decision about what may reach the model,
+// so a sub-agent registry built from the parent inherits it instead of showing
+// and calling every tool the parent hid.
+func TestFilterRegistryInheritsAnExclusiveSurface(t *testing.T) {
+	parent := tool.NewRegistry()
+	parent.Add(visTool{"run_code"})
+	parent.Add(visTool{"bash"})
+	parent.SetProviderVisibleToolsExclusive([]string{"run_code"})
+
+	child := FilterRegistry(parent, nil)
+	schemas := child.Schemas()
+	if len(schemas) != 1 || schemas[0].Name != "run_code" {
+		t.Fatalf("child schemas = %v, want only run_code", schemas)
+	}
+	child.ShowToProvider(true, "bash")
+	if schemas := child.Schemas(); len(schemas) != 1 {
+		t.Fatalf("the child's exclusive surface was widened: %v", schemas)
+	}
+}

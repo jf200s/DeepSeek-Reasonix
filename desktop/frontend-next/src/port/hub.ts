@@ -352,8 +352,9 @@ export class SseHub implements HubPort {
     try {
       await this.post<void>(`/runtimes/${encodeURIComponent(id)}/close`);
     } catch (e) {
-      // A pane the kernel no longer holds is already closed.
-      if (!(e instanceof HttpError && e.reason?.code === "request.not_found")) throw e;
+      // A pane the kernel no longer holds is already closed; a proxy can also
+      // answer 404 or 410 for a runtime it no longer serves.
+      if (!(e instanceof HttpError && (e.status === 404 || e.status === 410))) throw e;
     }
     this.ports.delete(id);
     this.settings.delete(id);

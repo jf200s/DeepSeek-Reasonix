@@ -159,104 +159,17 @@ func cliCompletionRootSpec() cliCompletionSpec {
 			completionFlag("--workspace-only", cliCompletionNoValue), help,
 		}),
 		mcpCompletionSpec(help),
-		completionSpec("remote", []cliCompletionFlag{help},
-			completionSpec("add", []cliCompletionFlag{
-				completionFlag("--identity --jump --workspace --serve-install --passphrase-env --password-env", cliCompletionStaticValue),
-				completionFlag("--use-ssh-config", cliCompletionNoValue), help,
-			}),
-			completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{help}),
-			completionSpecWithAliases("remove", []string{"rm"}, []cliCompletionFlag{help}),
-			completionSpec("import", []cliCompletionFlag{completionFlag("--all", cliCompletionNoValue), help}),
-			completionSpec("test", []cliCompletionFlag{help}),
-			completionSpecWithAliases("connect", []string{"open"}, []cliCompletionFlag{
-				completionFlag("--workspace --local-port", cliCompletionStaticValue),
-				completionFlag("--no-serve --open --forward-only", cliCompletionNoValue), help,
-			}),
-			completionSpec("status", []cliCompletionFlag{help}),
-			completionSpec("forward", []cliCompletionFlag{help},
-				completionSpec("add", []cliCompletionFlag{help}),
-				completionSpecWithAliases("remove", []string{"rm"}, []cliCompletionFlag{help}),
-				completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{help}),
-			),
-			completionSpec("serve", []cliCompletionFlag{help},
-				completionSpec("start", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
-				completionSpec("stop", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
-				completionSpec("status", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
-				completionSpec("logs", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
-			),
-			completionSpec("fs", []cliCompletionFlag{help},
-				completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{help}),
-				completionSpec("get", []cliCompletionFlag{help}),
-				completionSpec("put", []cliCompletionFlag{help}),
-			),
-			completionSpec("attach-workspace", []cliCompletionFlag{completionFlag("--stdio", cliCompletionNoValue), completionFlag("--workspace", cliCompletionStaticValue), help}),
-		),
-		completionSpec("plugin", []cliCompletionFlag{help},
-			completionSpec("install", []cliCompletionFlag{
-				completionFlag("--yes --dry-run --link --replace", cliCompletionNoValue),
-				completionFlag("--name", cliCompletionStaticValue), help,
-			}),
-			completionSpec("list", []cliCompletionFlag{help}),
-			completionSpec("show", []cliCompletionFlag{help}),
-			completionSpecWithAliases("remove", []string{"uninstall"}, []cliCompletionFlag{completionFlag("--yes", cliCompletionNoValue), help}),
-			completionSpec("enable", []cliCompletionFlag{help}),
-			completionSpec("disable", []cliCompletionFlag{help}),
-			completionSpec("doctor", []cliCompletionFlag{help}),
-		),
-		completionSpec("subagent", []cliCompletionFlag{help},
-			completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{completionFlag("--dir", cliCompletionPathValue), help}),
-			completionSpecWithAliases("create", []string{"new"}, append(subagentCompletionFlags(model, effort, help), completionFlag("--scope", cliCompletionStaticValue, "project", "global"))),
-			completionSpecWithAliases("edit", []string{"update"}, subagentCompletionFlags(model, effort, help)),
-			completionSpecWithAliases("delete", []string{"remove", "rm"}, []cliCompletionFlag{
-				completionFlag("--yes", cliCompletionNoValue), completionFlag("--dir", cliCompletionPathValue), help,
-			}),
-			completionSpec("try", []cliCompletionFlag{model, completionFlag("--max-steps --dir", cliCompletionStaticValue), help}),
-			completionSpec("run", []cliCompletionFlag{model, completionFlag("--max-steps --dir", cliCompletionStaticValue), help}),
-		),
+		remoteCompletionSpec(help),
+		pluginCompletionSpec(help),
+		subagentCompletionSpec(help, model, effort),
 		doctorCompletionSpec(help),
 		sessionsCompletionSpec(help),
 		catalogCompletionSpec(help),
-		completionSpec("report", []cliCompletionFlag{help},
-			completionSpec("list", []cliCompletionFlag{help}),
-			completionSpec("show", []cliCompletionFlag{help}),
-			completionSpec("send", []cliCompletionFlag{help}),
-			completionSpec("delete", []cliCompletionFlag{help}),
-		),
-		completionSpec("session", []cliCompletionFlag{help},
-			completionSpec("list", machineSessionCompletionFlags(help)),
-			completionSpec("show", machineSessionCompletionFlags(help)),
-			completionSpec("status", machineSessionCompletionFlags(help)),
-			completionSpec("recovery", machineSessionCompletionFlags(help)),
-		),
+		reportCompletionSpec(help),
+		sessionCompletionSpec(help),
 		hookCompletionSpec(help),
 		completionSpec("trust", []cliCompletionFlag{completionFlag("--dir", cliCompletionPathValue), completionFlag("--yes -y --revoke", cliCompletionNoValue), help}),
-		completionSpec("task", []cliCompletionFlag{help},
-			// Machine list/show: --json --dir --project-root --session (task_machine.go).
-			completionSpec("list", completionTaskMachineListFlags(help)),
-			completionSpec("show", completionTaskMachineShowFlags(help)),
-			// Live monitor surface (task.go FlagSets).
-			completionSpec("monitor", []cliCompletionFlag{help},
-				completionSpec("list", completionTaskListFlags(help)),
-				completionSpec("status", completionTaskStatusFlags(help)),
-				completionSpec("events", completionTaskEventsFlags(help)),
-				completionSpec("stop", completionTaskControlFlags(help)),
-				completionSpec("cancel", completionTaskControlFlags(help)),
-				completionSpec("requeue", completionTaskRequeueFlags(help)),
-				completionSpec("open-session", completionTaskOpenSessionFlags(help)),
-			),
-			completionSpec("status", completionTaskStatusFlags(help)),
-			completionSpec("events", completionTaskEventsFlags(help)),
-			completionSpec("stop", completionTaskControlFlags(help)),
-			completionSpec("cancel", completionTaskControlFlags(help)),
-			completionSpec("requeue", completionTaskRequeueFlags(help)),
-			completionSpec("open-session", completionTaskOpenSessionFlags(help)),
-			completionSpec("tmux", []cliCompletionFlag{help},
-				completionSpec("attach", completionTaskTmuxAttachFlags(help)),
-				completionSpec("status", completionTaskTmuxFlags(help)),
-				completionSpec("open", completionTaskTmuxFlags(help)),
-				completionSpec("detach", completionTaskTmuxFlags(help)),
-			),
-		),
+		taskCompletionSpec(help),
 		completionSpec("review", []cliCompletionFlag{
 			completionFlag("--base --commit --instructions", cliCompletionStaticValue), model, help,
 		}),
@@ -275,6 +188,124 @@ func cliCompletionRootSpec() cliCompletionSpec {
 		completionSpec("help", []cliCompletionFlag{help}),
 	}
 	return root
+}
+
+func remoteCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
+	return completionSpec("remote", []cliCompletionFlag{help},
+		completionSpec("add", []cliCompletionFlag{
+			completionFlag("--identity --jump --workspace --serve-install --idle-timeout --passphrase-env --password-env", cliCompletionStaticValue),
+			completionFlag("--use-ssh-config", cliCompletionNoValue), help,
+		}),
+		completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{help}),
+		completionSpecWithAliases("remove", []string{"rm"}, []cliCompletionFlag{help}),
+		completionSpec("import", []cliCompletionFlag{completionFlag("--all", cliCompletionNoValue), help}),
+		completionSpec("test", []cliCompletionFlag{help}),
+		completionSpecWithAliases("connect", []string{"open"}, []cliCompletionFlag{
+			completionFlag("--workspace --local-port", cliCompletionStaticValue),
+			completionFlag("--no-serve --open --forward-only", cliCompletionNoValue), help,
+		}),
+		completionSpec("status", []cliCompletionFlag{help}),
+		completionSpec("stop", []cliCompletionFlag{help}),
+		completionSpec("forward", []cliCompletionFlag{help},
+			completionSpec("add", []cliCompletionFlag{help}),
+			completionSpecWithAliases("remove", []string{"rm"}, []cliCompletionFlag{help}),
+			completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{help}),
+		),
+		completionSpec("serve", []cliCompletionFlag{help},
+			completionSpec("start", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
+			completionSpec("stop", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
+			completionSpec("status", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
+			completionSpec("logs", []cliCompletionFlag{completionFlag("--workspace -n", cliCompletionStaticValue), help}),
+		),
+		completionSpec("fs", []cliCompletionFlag{help},
+			completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{help}),
+			completionSpec("get", []cliCompletionFlag{help}),
+			completionSpec("put", []cliCompletionFlag{help}),
+		),
+		completionSpec("wsl", []cliCompletionFlag{help},
+			completionSpec("list", []cliCompletionFlag{help}),
+			completionSpec("test", []cliCompletionFlag{help}),
+			completionSpec("add", []cliCompletionFlag{
+				completionFlag("--workspace --serve-install --idle-timeout", cliCompletionStaticValue), help,
+			}),
+		),
+	)
+}
+
+func pluginCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
+	return completionSpec("plugin", []cliCompletionFlag{help},
+		completionSpec("install", []cliCompletionFlag{
+			completionFlag("--yes --dry-run --link --replace", cliCompletionNoValue),
+			completionFlag("--name", cliCompletionStaticValue), help,
+		}),
+		completionSpec("list", []cliCompletionFlag{help}),
+		completionSpec("show", []cliCompletionFlag{help}),
+		completionSpecWithAliases("remove", []string{"uninstall"}, []cliCompletionFlag{completionFlag("--yes", cliCompletionNoValue), help}),
+		completionSpec("enable", []cliCompletionFlag{help}),
+		completionSpec("disable", []cliCompletionFlag{help}),
+		completionSpec("doctor", []cliCompletionFlag{help}),
+	)
+}
+
+func subagentCompletionSpec(help, model, effort cliCompletionFlag) cliCompletionSpec {
+	return completionSpec("subagent", []cliCompletionFlag{help},
+		completionSpecWithAliases("list", []string{"ls"}, []cliCompletionFlag{completionFlag("--dir", cliCompletionPathValue), help}),
+		completionSpecWithAliases("create", []string{"new"}, append(subagentCompletionFlags(model, effort, help), completionFlag("--scope", cliCompletionStaticValue, "project", "global"))),
+		completionSpecWithAliases("edit", []string{"update"}, subagentCompletionFlags(model, effort, help)),
+		completionSpecWithAliases("delete", []string{"remove", "rm"}, []cliCompletionFlag{
+			completionFlag("--yes", cliCompletionNoValue), completionFlag("--dir", cliCompletionPathValue), help,
+		}),
+		completionSpec("try", []cliCompletionFlag{model, completionFlag("--max-steps --dir", cliCompletionStaticValue), help}),
+		completionSpec("run", []cliCompletionFlag{model, completionFlag("--max-steps --dir", cliCompletionStaticValue), help}),
+	)
+}
+
+func reportCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
+	return completionSpec("report", []cliCompletionFlag{help},
+		completionSpec("list", []cliCompletionFlag{help}),
+		completionSpec("show", []cliCompletionFlag{help}),
+		completionSpec("send", []cliCompletionFlag{help}),
+		completionSpec("delete", []cliCompletionFlag{help}),
+	)
+}
+
+func sessionCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
+	return completionSpec("session", []cliCompletionFlag{help},
+		completionSpec("list", machineSessionCompletionFlags(help)),
+		completionSpec("show", machineSessionCompletionFlags(help)),
+		completionSpec("status", machineSessionCompletionFlags(help)),
+		completionSpec("recovery", machineSessionCompletionFlags(help)),
+	)
+}
+
+func taskCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
+	return completionSpec("task", []cliCompletionFlag{help},
+		// Machine list/show: --json --dir --project-root --session (task_machine.go).
+		completionSpec("list", completionTaskMachineListFlags(help)),
+		completionSpec("show", completionTaskMachineShowFlags(help)),
+		// Live monitor surface (task.go FlagSets).
+		completionSpec("monitor", []cliCompletionFlag{help},
+			completionSpec("list", completionTaskListFlags(help)),
+			completionSpec("status", completionTaskStatusFlags(help)),
+			completionSpec("events", completionTaskEventsFlags(help)),
+			completionSpec("stop", completionTaskControlFlags(help)),
+			completionSpec("cancel", completionTaskControlFlags(help)),
+			completionSpec("requeue", completionTaskRequeueFlags(help)),
+			completionSpec("open-session", completionTaskOpenSessionFlags(help)),
+		),
+		completionSpec("status", completionTaskStatusFlags(help)),
+		completionSpec("events", completionTaskEventsFlags(help)),
+		completionSpec("stop", completionTaskControlFlags(help)),
+		completionSpec("cancel", completionTaskControlFlags(help)),
+		completionSpec("requeue", completionTaskRequeueFlags(help)),
+		completionSpec("open-session", completionTaskOpenSessionFlags(help)),
+		completionSpec("tmux", []cliCompletionFlag{help},
+			completionSpec("attach", completionTaskTmuxAttachFlags(help)),
+			completionSpec("status", completionTaskTmuxFlags(help)),
+			completionSpec("open", completionTaskTmuxFlags(help)),
+			completionSpec("detach", completionTaskTmuxFlags(help)),
+		),
+	)
 }
 
 func doctorCompletionSpec(help cliCompletionFlag) cliCompletionSpec {
@@ -300,7 +331,7 @@ func cliServeCompletionFlags(model, profile, help cliCompletionFlag) []cliComple
 		// Serve/Web resume accepts file paths, not branch IDs.
 		completionFlag("--resume", cliCompletionPathValue),
 		completionFlag("--auth", cliCompletionStaticValue, "none", "token", "password"),
-		completionFlag("--token --password --port-file --token-file --pid-file", cliCompletionStaticValue),
+		completionFlag("--token --password --port-file --token-file --pid-file --idle-timeout", cliCompletionStaticValue),
 		completionFlag("--hash-password --behind-proxy --open --no-open", cliCompletionNoValue), help,
 	}
 }

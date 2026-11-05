@@ -91,6 +91,7 @@ func (windowsShell) LaunchScript(spec LaunchSpec, p StatePaths) (string, []byte)
 		" --token-file " + psQuote(toShellPath(p.TokenFile)) +
 		" --port-file " + psQuote(toShellPath(p.PortFile)) +
 		" --pid-file " + psQuote(toShellPath(p.PidFile)) +
+		posixIdleArgs(spec) +
 		windowsBrokerArgs(spec, p) +
 		" *>> " + psQuote(toShellPath(p.LogFile))
 	// Windows PowerShell 5.1 needs a BOM to read non-ASCII paths as UTF-8.

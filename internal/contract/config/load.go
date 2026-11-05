@@ -135,6 +135,19 @@ func (r Roots) loadForRoot(root string, migrateOnDisk, withProject bool) (*Confi
 	if cfg.systemPromptFileSource == promptFileSourceUnknown && cfg.Agent.SystemPromptFile != "" {
 		cfg.systemPromptFileSource = promptFileSourceUser
 	}
+	// The global [remote] idle timeout is user-only, so there is no narrower
+	// project value to fall back to: a value outside what a kernel can honour
+	// is a user-file error, reported here with the setting named rather than
+	// carried into a duration on the next connect.
+	if err := validateRemoteIdleTimeout("", cfg.Remote.IdleTimeoutMinutes); err != nil {
+		return nil, err
+	}
+	// Per-host overrides came from the same user file, so they are held to the
+	// same range: a bad value is refused with the host it belongs to instead of
+	// being carried onto a later connect.
+	if err := validateRemoteHostIdleTimeouts(cfg.Remote.Hosts); err != nil {
+		return nil, err
+	}
 	userDefaultModel := cfg.DefaultModel
 	held := holdUserScope(cfg)
 	var projectMeta toml.MetaData
@@ -663,6 +676,12 @@ func loadForEditStrict(path string, loadCredentials, persistMigrations bool) (*C
 	cfg := Default()
 	meta, err := mergeFileSnapshot(cfg, path)
 	if err != nil {
+		return nil, err
+	}
+	// The edit path decodes the same [remote.hosts] book, so it refuses an
+	// out-of-range per-host idle timeout before any migration save can rewrite
+	// the file around it.
+	if err := validateRemoteHostIdleTimeouts(cfg.Remote.Hosts); err != nil {
 		return nil, err
 	}
 	markProjectEditProvenance(cfg, path, meta)

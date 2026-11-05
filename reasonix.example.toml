@@ -183,6 +183,19 @@ mcp_call_timeout_seconds = 300   # default MCP call safety cap; per-plugin/tool 
 [tools.background_jobs]
 stalled_warning_seconds = 900   # warn once per background job after this many quiet seconds; 0 disables
 
+# Programmatic tool calling (user file only). With this on, the model sees one
+# run_code tool and writes a short synchronous JavaScript program that calls the
+# other tools; only what the program logs or returns enters the conversation.
+# Every call inside it is still permission-checked and shown as its own card.
+# [tools.ptc]            # user file only; a project reasonix.toml cannot set this section
+# enabled = true
+# exclusive = true       # hide every other tool, so all calls go through run_code
+# timeout_seconds = 120  # one program's wall clock; the runtime caps it at 600s
+# max_calls = 100        # host tool calls allowed in one program
+# max_program_bytes = 65536
+# max_output_bytes = 65536
+# max_parallel = 8       # tools.parallel concurrency; read-only tools only; the runtime caps it at 16
+
 # Sandbox confinement bounds the blast radius of tool calls. Writers may only
 # modify workspace_root (empty = current directory) plus allow_write. forbid_read
 # hides sensitive directories from read/list/search tools and from sandboxed bash

@@ -163,6 +163,23 @@ describe("panes sharing one stream", () => {
     expect(remote.got).toEqual([]);
   });
 
+  it("drops a pane whose runtime is gone instead of giving it a dead stream", async () => {
+    const hub = stubHub((_m, url) => url.endsWith("/panes/r1")
+      ? { status: 404, json: { code: "request.not_found", params: { kind: "runtime", name: "r1" } } }
+      : { status: 204 });
+    const client = new MuxClient();
+    const gone = vi.fn();
+    client.onTerminal(gone);
+    const a = pane(client, "r1");
+    hub.sources[0].open("c1");
+    await flush();
+    expect(a.own).not.toHaveBeenCalled();
+    expect(gone).toHaveBeenCalledWith("r1");
+    expect(client.carried()).toEqual([]);
+    expect(hub.sources.some((s) => s.url.includes("/rt/r1"))).toBe(false);
+    a.stop();
+  });
+
   it("reopens the stream when the hub no longer knows the connection", async () => {
     let stale = true;
     const hub = stubHub((m) => {

@@ -196,6 +196,17 @@ var table = []Entry{
 	{ID: "tools.present_files", Class: Elevated, Effect: OnOpen},
 	{ID: "tools.video_native_max_bytes", Class: Guarded, Effect: OnOpen},
 	{ID: "tools.mcp_load", Class: Guarded, Effect: OnOpen},
+	{ID: "tools.ptc.enabled", Class: Guarded, Effect: OnOpen},
+	// exclusive only chooses which tools the model sees, so it is a Preference.
+	// The program's resource caps are the user's: a model that could propose
+	// raising its own call, time or output budget would be widening a limit
+	// that exists to bound it, so those are Guarded like the other caps.
+	{ID: "tools.ptc.exclusive", Class: Preference, Effect: OnOpen},
+	{ID: "tools.ptc.timeout_seconds", Class: Guarded, Effect: OnOpen},
+	{ID: "tools.ptc.max_calls", Class: Guarded, Effect: OnOpen},
+	{ID: "tools.ptc.max_program_bytes", Class: Guarded, Effect: OnOpen},
+	{ID: "tools.ptc.max_output_bytes", Class: Guarded, Effect: OnOpen},
+	{ID: "tools.ptc.max_parallel", Class: Guarded, Effect: OnOpen},
 	{ID: "permissions.mode", Class: Guarded, Effect: OnOpen},
 	{ID: "permissions.allow", Class: Guarded, Effect: OnOpen},
 	{ID: "permissions.ask", Class: Guarded, Effect: OnOpen},
@@ -253,6 +264,7 @@ var table = []Entry{
 	{ID: "secrets.protect_sensitive_files", Class: Guarded, Effect: OnOpen},
 	{ID: "secrets.protect_credential_files", Class: Guarded, Effect: OnOpen},
 	{ID: "remote.import_ssh_config", Class: Guarded, Effect: OnOpen},
+	{ID: "remote.idle_timeout_minutes", Class: Guarded, Effect: OnOpen},
 	{ID: "remote.hosts", Class: Guarded, Effect: OnOpen},
 	{ID: "auto_submit", Class: Preference, Effect: OnOpen},
 	{ID: "observability.otlp.enabled", Class: Elevated, Effect: OnOpen},

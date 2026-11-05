@@ -214,6 +214,7 @@ func remoteConnectCLI(args []string, version string) int {
 		res, err := bootstrap.EnsureServe(ctx, client, bootstrap.Options{
 			Workspace:       ws,
 			Install:         entry.ServeInstallMode(),
+			IdleTimeout:     idleTimeoutFor(entry, cfg),
 			Broker:          broker,
 			LocalBinary:     currentExecutable(),
 			LocalGOOS:       runtime.GOOS,
@@ -332,6 +333,15 @@ func resolveRemoteCLIDownload(ctx context.Context, version, goos, goarch string)
 
 const remoteServeUsage = "usage: reasonix remote serve start|stop|status|logs <name> [--workspace PATH] [-n N]"
 
+// idleTimeoutFor is the per-host idle policy, with the global [remote] value
+// filling in a host that does not override it. A negative duration means the
+// kernel is left running until stopped; zero means it exits as soon as no
+// client is connected.
+func idleTimeoutFor(entry config.RemoteHostEntry, cfg *config.Config) *time.Duration {
+	d := entry.IdleTimeout(cfg.Remote.IdleTimeoutMinutes)
+	return &d
+}
+
 // remoteServeCLI: serve start|stop|status|logs <name>.
 func remoteServeCLI(args []string, version string) int {
 	if commandHelpRequested(args, 2) {
@@ -382,6 +392,7 @@ func remoteServeCLI(args []string, version string) int {
 		// process is — leaving that kernel calling a port nobody holds.
 		res, err := bootstrap.EnsureServe(ctx, client, bootstrap.Options{
 			Workspace: ws, Install: entry.ServeInstallMode(),
+			IdleTimeout: idleTimeoutFor(entry, cfg),
 			LocalBinary: currentExecutable(), LocalGOOS: runtime.GOOS, LocalGOARCH: runtime.GOARCH,
 			ProductVersion: version, FetchBinary: fetchRemoteCLIBinary,
 			ResolveDownload: resolveRemoteCLIDownload,
@@ -409,7 +420,7 @@ func remoteServeCLI(args []string, version string) int {
 			fmt.Println("no serve recorded for this workspace")
 			return 0
 		}
-		fmt.Printf("pid=%d addr=%s alive=%v workspace=%s\n", st.PID, st.Addr, alive, st.Workspace)
+		fmt.Printf("pid=%d addr=%s alive=%v workspace=%s started=%d idle_timeout=%ds\n", st.PID, st.Addr, alive, st.Workspace, st.StartedAt, st.IdleTimeoutSeconds)
 		return 0
 	case "logs":
 		if err := bootstrap.Logs(ctx, client, ws, *n, os.Stdout); err != nil {

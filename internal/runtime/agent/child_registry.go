@@ -148,6 +148,9 @@ func FilterRegistry(parent *tool.Registry, names []string, exclude ...string) *t
 		}
 		sub.Add(tl)
 	}
+	// The parent's visibility is a decision about what may reach the model, so
+	// the child inherits it: an exclusive program surface stays exclusive.
+	sub.CopyProviderVisibilityFrom(parent)
 	return sub
 }
 

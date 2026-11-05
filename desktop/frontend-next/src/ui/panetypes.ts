@@ -49,6 +49,9 @@ export interface PaneProps {
   visible: boolean;
   onSessionChanged: () => void;
   onTurnDone?: (id: string) => void;
+  // The runtime this pane names is gone; the window drops the pane but the
+  // component keeps drawing what it last held.
+  onGone?: (id: string) => void;
   // Bumped when something outside this pane changed a setting that belongs to
   // its session. /status is polled only while a turn runs, so without this the
   // pane keeps reporting the posture it had when it opened.

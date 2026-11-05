@@ -1,13 +1,18 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"reasonix/internal/base/testenv"
 )
+
+func intPtr(v int) *int { return &v }
 
 // TestProjectConfigCannotOverrideRemote pins [remote] as a user-global
 // security control: a cloned repository's reasonix.toml must not be able to
@@ -103,6 +108,21 @@ host = "10.0.0.1"
 	}
 	if m.ServeInstallMode() != "auto" {
 		t.Fatalf("default ServeInstallMode = %q, want auto", m.ServeInstallMode())
+	}
+}
+
+// A WSL distribution runs on another platform, so the copy this side would
+// upload can never run there. A book entry that still names that strategy —
+// hand-edited, or left from before the form stopped offering it — reads as the
+// strategy that can work instead of failing on every connect.
+func TestAWSLHostNeverTakesTheUploadStrategy(t *testing.T) {
+	entry := RemoteHostEntry{Name: "wsl", Kind: RemoteKindWSL, Distro: "Ubuntu", ServeInstall: "upload"}
+	if got := entry.ServeInstallMode(); got != "auto" {
+		t.Fatalf("ServeInstallMode = %q, want auto", got)
+	}
+	ssh := RemoteHostEntry{Name: "box", Host: "10.0.0.4", ServeInstall: "upload"}
+	if got := ssh.ServeInstallMode(); got != "upload" {
+		t.Fatalf("an ssh host lost its upload strategy: %q", got)
 	}
 }
 
@@ -381,5 +401,296 @@ func TestPlaceRemoteHostOrdersTheBook(t *testing.T) {
 		if got := c.PlaceRemoteHost(step.name, step.before); got != step.changed || order() != step.want {
 			t.Fatalf("place %s before %q = %v, order %s; want %v, %s", step.name, step.before, got, order(), step.changed, step.want)
 		}
+	}
+}
+
+// A kernel kept alive for reconnect needs an owner: the idle timeout says how
+// long it may sit with no client. It is a global default with a per-host
+// override, and the zero value is meaningful, so it is stored as a pointer in
+// both places.
+func TestRemoteIdleTimeoutDecodesGloballyAndPerHost(t *testing.T) {
+	isolateUserConfigHome(t)
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	toml := `
+[remote]
+idle_timeout_minutes = 30
+
+[[remote.hosts]]
+name = "override"
+host = "10.0.0.1"
+idle_timeout_minutes = 0
+
+[[remote.hosts]]
+name = "inherit"
+host = "10.0.0.2"
+`
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(toml), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if cfg.Remote.IdleTimeoutMinutes == nil || *cfg.Remote.IdleTimeoutMinutes != 30 {
+		t.Fatalf("global idle timeout = %v, want 30", cfg.Remote.IdleTimeoutMinutes)
+	}
+	override, _ := cfg.RemoteHost("override")
+	if override.IdleTimeoutMinutes == nil || *override.IdleTimeoutMinutes != 0 {
+		t.Fatalf("per-host idle timeout = %v, want 0", override.IdleTimeoutMinutes)
+	}
+	inherit, _ := cfg.RemoteHost("inherit")
+	if inherit.IdleTimeoutMinutes != nil {
+		t.Fatalf("unset per-host idle timeout = %v, want nil", inherit.IdleTimeoutMinutes)
+	}
+}
+
+func TestRemoteIdleTimeoutAccessorDefaultsAndOverrides(t *testing.T) {
+	wsl := RemoteHostEntry{Name: "wsl", Kind: RemoteKindWSL, Distro: "Ubuntu"}
+	cases := []struct {
+		name   string
+		global *int
+		entry  RemoteHostEntry
+		want   time.Duration
+	}{
+		// An SSH kernel keeps its long-standing stay-resident behaviour: nobody
+		// asked for an idle exit, so it is never reported.
+		{"ssh default never exits", nil, RemoteHostEntry{}, -time.Minute},
+		// A WSL distribution is kept alive for reconnects, and a kernel nobody
+		// stops has to leave on its own.
+		{"wsl default keeps it ten minutes", nil, wsl, 10 * time.Minute},
+		{"global default", intPtr(30), RemoteHostEntry{}, 30 * time.Minute},
+		{"global default reaches wsl", intPtr(30), wsl, 30 * time.Minute},
+		{"host override", intPtr(30), RemoteHostEntry{IdleTimeoutMinutes: intPtr(5)}, 5 * time.Minute},
+		{"host override reaches wsl", nil, RemoteHostEntry{Kind: RemoteKindWSL, Distro: "Ubuntu", IdleTimeoutMinutes: intPtr(5)}, 5 * time.Minute},
+		{"zero exits at once", intPtr(30), RemoteHostEntry{IdleTimeoutMinutes: intPtr(0)}, 0},
+		{"zero exits at once on wsl", nil, RemoteHostEntry{Kind: RemoteKindWSL, Distro: "Ubuntu", IdleTimeoutMinutes: intPtr(0)}, 0},
+		{"minus one never", nil, RemoteHostEntry{IdleTimeoutMinutes: intPtr(-1)}, -time.Minute},
+		{"minus one never on wsl", nil, RemoteHostEntry{Kind: RemoteKindWSL, Distro: "Ubuntu", IdleTimeoutMinutes: intPtr(-1)}, -time.Minute},
+		{"today's maximum", nil, RemoteHostEntry{IdleTimeoutMinutes: intPtr(1440)}, 24 * time.Hour},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.entry.IdleTimeout(tc.global); got != tc.want {
+				t.Fatalf("IdleTimeout = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// The global [remote] idle timeout is read from the user file, so a value
+// outside what a kernel can honour has to be refused where it is loaded rather
+// than turned into a duration on a later connect.
+func TestGlobalRemoteIdleTimeoutOutOfRangeIsRefusedAtLoad(t *testing.T) {
+	for _, bad := range []int{-5, 99999} {
+		t.Run(strconv.Itoa(bad), func(t *testing.T) {
+			home := testenv.TempDir(t)
+			t.Setenv("REASONIX_HOME", home)
+			body := fmt.Sprintf("[remote]\nidle_timeout_minutes = %d\n", bad)
+			if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted idle_timeout_minutes = %d", bad)
+			} else if !strings.Contains(err.Error(), "idle_timeout_minutes") || !strings.Contains(err.Error(), "-1..1440") {
+				t.Fatalf("Load error = %v, want the off-range value named", err)
+			}
+		})
+	}
+}
+
+// A WSL host can never take the upload strategy, so a save must write the value
+// that will actually be used instead of preserving one that cannot.
+func TestWSLUploadStrategyRendersAsTheEffectiveAuto(t *testing.T) {
+	c := Default()
+	c.Remote.Hosts = []RemoteHostEntry{{Name: "wsl", Kind: RemoteKindWSL, Distro: "Ubuntu", ServeInstall: "upload"}}
+	out := RenderTOMLForScope(c, RenderScopeUser)
+	if strings.Contains(out, `serve_install = "upload"`) {
+		t.Fatalf("render preserved a strategy a WSL host can never use:\n%s", out)
+	}
+	if !strings.Contains(out, `serve_install = "auto"`) {
+		t.Fatalf("render did not write the effective auto strategy:\n%s", out)
+	}
+}
+
+func TestRemoteIdleTimeoutIsValidatedAndSurvivesASave(t *testing.T) {
+	isolateUserConfigHome(t)
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	path := filepath.Join(home, "config.toml")
+	if err := os.WriteFile(path, []byte("default_model = \"deepseek\"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cfg := LoadForEdit(path)
+	if cfg == nil {
+		t.Fatal("LoadForEdit returned nil")
+	}
+	for _, bad := range []int{-2, 1441} {
+		if err := cfg.UpsertRemoteHost(RemoteHostEntry{Name: "box", Host: "h", IdleTimeoutMinutes: intPtr(bad)}); err == nil {
+			t.Fatalf("idle_timeout_minutes %d was accepted", bad)
+		}
+	}
+	for _, good := range []int{-1, 0, 1440} {
+		if err := cfg.UpsertRemoteHost(RemoteHostEntry{Name: "box", Host: "h", IdleTimeoutMinutes: intPtr(good)}); err != nil {
+			t.Fatalf("idle_timeout_minutes %d was refused: %v", good, err)
+		}
+	}
+
+	// Leave a value on the host and one on the section; a renderer that forgets
+	// either line drops it on the next unrelated save.
+	if err := cfg.UpsertRemoteHost(RemoteHostEntry{Name: "box", Host: "h", IdleTimeoutMinutes: intPtr(0)}); err != nil {
+		t.Fatal(err)
+	}
+	cfg.Remote.IdleTimeoutMinutes = intPtr(15)
+	if err := cfg.SaveTo(path); err != nil {
+		t.Fatalf("SaveTo: %v", err)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"idle_timeout_minutes = 15", "idle_timeout_minutes = 0"} {
+		if !strings.Contains(string(raw), want) {
+			t.Fatalf("saved config missing %q:\n%s", want, raw)
+		}
+	}
+
+	reloaded := LoadForEdit(path)
+	if reloaded.Remote.IdleTimeoutMinutes == nil || *reloaded.Remote.IdleTimeoutMinutes != 15 {
+		t.Fatalf("global idle timeout after save/reload = %v, want 15", reloaded.Remote.IdleTimeoutMinutes)
+	}
+	got, ok := reloaded.RemoteHost("box")
+	if !ok || got.IdleTimeoutMinutes == nil || *got.IdleTimeoutMinutes != 0 {
+		t.Fatalf("host idle timeout after save/reload = %v", got.IdleTimeoutMinutes)
+	}
+}
+
+// A per-host idle timeout is read from the same user file as the [remote]
+// default, and a hand-written value outside -1..1440 has to be refused there
+// with the host it belongs to named, not turned into a duration on a connect.
+func TestPerHostRemoteIdleTimeoutOutOfRangeIsRefusedAtLoad(t *testing.T) {
+	for _, bad := range []int{-5, 99999} {
+		t.Run(strconv.Itoa(bad), func(t *testing.T) {
+			home := testenv.TempDir(t)
+			t.Setenv("REASONIX_HOME", home)
+			body := fmt.Sprintf("[remote]\n[[remote.hosts]]\nname = \"box\"\nhost = \"10.0.0.1\"\nidle_timeout_minutes = %d\n", bad)
+			if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := Load(); err == nil {
+				t.Fatalf("Load accepted per-host idle_timeout_minutes = %d", bad)
+			} else if !strings.Contains(err.Error(), `remote host "box"`) || !strings.Contains(err.Error(), "-1..1440") {
+				t.Fatalf("Load error = %v, want the host name and range named", err)
+			}
+		})
+	}
+}
+
+// The edit loaders decode the same book, so a settings surface cannot load an
+// out-of-range override and offer to save it back.
+func TestPerHostRemoteIdleTimeoutOutOfRangeIsRefusedForEdit(t *testing.T) {
+	for _, bad := range []int{-5, 99999} {
+		t.Run(strconv.Itoa(bad), func(t *testing.T) {
+			home := testenv.TempDir(t)
+			t.Setenv("REASONIX_HOME", home)
+			path := filepath.Join(home, "config.toml")
+			body := fmt.Sprintf("[remote]\n[[remote.hosts]]\nname = \"box\"\nhost = \"10.0.0.1\"\nidle_timeout_minutes = %d\n", bad)
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := LoadForEditReadOnlyStrict(path); err == nil {
+				t.Fatalf("LoadForEditReadOnlyStrict accepted per-host idle_timeout_minutes = %d", bad)
+			} else if !strings.Contains(err.Error(), `remote host "box"`) || !strings.Contains(err.Error(), "-1..1440") {
+				t.Fatalf("LoadForEditReadOnlyStrict error = %v, want the host name and range named", err)
+			}
+			// LoadForEdit recovers, but the recovered config refuses to save over
+			// the file it could not read.
+			if err := LoadForEdit(path).SaveTo(path); err == nil {
+				t.Fatal("LoadForEdit's recovered config saved over an out-of-range override")
+			}
+		})
+	}
+}
+
+// The accepted range itself still loads and reaches the host unchanged.
+func TestPerHostRemoteIdleTimeoutInRangeLoads(t *testing.T) {
+	for _, good := range []int{-1, 0, 1440} {
+		t.Run(strconv.Itoa(good), func(t *testing.T) {
+			home := testenv.TempDir(t)
+			t.Setenv("REASONIX_HOME", home)
+			path := filepath.Join(home, "config.toml")
+			body := fmt.Sprintf("[remote]\n[[remote.hosts]]\nname = \"box\"\nhost = \"10.0.0.1\"\nidle_timeout_minutes = %d\n", good)
+			if err := os.WriteFile(path, []byte(body), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load refused in-range idle_timeout_minutes = %d: %v", good, err)
+			}
+			host, ok := cfg.RemoteHost("box")
+			if !ok || host.IdleTimeoutMinutes == nil || *host.IdleTimeoutMinutes != good {
+				t.Fatalf("host idle timeout = %v, want %d", host.IdleTimeoutMinutes, good)
+			}
+			if _, err := LoadForEditReadOnlyStrict(path); err != nil {
+				t.Fatalf("LoadForEditReadOnlyStrict refused in-range idle_timeout_minutes = %d: %v", good, err)
+			}
+		})
+	}
+}
+
+// A config mutated in memory is guarded too: SaveTo is the last step before
+// the value is on disk, so it must refuse what Load would refuse on the next
+// start, whichever save entry point a caller uses.
+func TestSaveToRefusesOutOfRangeRemoteHostIdleTimeout(t *testing.T) {
+	for _, bad := range []int{-5, 99999} {
+		t.Run(strconv.Itoa(bad), func(t *testing.T) {
+			c := Default()
+			c.Remote.Hosts = []RemoteHostEntry{{Name: "box", Host: "10.0.0.1", IdleTimeoutMinutes: intPtr(bad)}}
+			dir := testenv.TempDir(t)
+			for name, save := range map[string]func(string) error{
+				"SaveTo":      func(path string) error { return c.SaveTo(path) },
+				"SaveToScope": func(path string) error { return c.SaveToScope(path, RenderScopeUser) },
+			} {
+				path := filepath.Join(dir, name+".toml")
+				err := save(path)
+				if err == nil {
+					t.Fatalf("%s accepted per-host idle_timeout_minutes = %d", name, bad)
+				}
+				if !strings.Contains(err.Error(), `remote host "box"`) || !strings.Contains(err.Error(), "-1..1440") {
+					t.Fatalf("%s error = %v, want the host name and range named", name, err)
+				}
+				if _, statErr := os.Stat(path); !os.IsNotExist(statErr) {
+					t.Fatalf("%s wrote %s despite the refusal", name, path)
+				}
+			}
+		})
+	}
+}
+
+// The run_code kernel clamps both of these values, so a render that keeps the
+// written number would show a limit the next run silently lowers.
+func TestPTCRenderConvergesOnTheKernelCaps(t *testing.T) {
+	c := Default()
+	timeout := 99999
+	c.Tools.PTC.TimeoutSeconds = &timeout
+	c.Tools.PTC.MaxParallel = 99
+	out := RenderTOMLForScope(c, RenderScopeUser)
+	for _, want := range []string{
+		"timeout_seconds = 600",
+		"max_parallel = 16",
+		"the kernel caps it at 600",
+		"the kernel caps it at 16",
+	} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("render is missing %q:\n%s", want, out)
+		}
+	}
+
+	// Values under the caps are written as configured.
+	timeout = 45
+	c.Tools.PTC.MaxParallel = 3
+	out = RenderTOMLForScope(c, RenderScopeUser)
+	if !strings.Contains(out, "timeout_seconds = 45") || !strings.Contains(out, "max_parallel = 3") {
+		t.Fatalf("render changed in-range values:\n%s", out)
 	}
 }

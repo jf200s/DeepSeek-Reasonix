@@ -88,6 +88,15 @@ type RemoteAttacher interface {
 	Probe(ctx context.Context, host string) (RemoteProbe, error)
 }
 
+// RemoteResolver is an attacher whose endpoints move. A kernel relaunched after
+// its link came back answers on a new local address, so a pane opened before
+// that has to follow it rather than keep calling the one that stopped
+// answering. An attacher that cannot move answers nothing and the pane keeps
+// the endpoint it was opened on.
+type RemoteResolver interface {
+	Resolve(host, workspace string) (RemoteEndpoint, bool)
+}
+
 // RemoteProbe is one machine's readiness. Ready says a route to a kernel
 // exists, never that taking it will succeed — only trying finds that out.
 type RemoteProbe struct {
@@ -411,11 +420,40 @@ func remoteBaseName(p string) string {
 	return p
 }
 
-// remoteProxy forwards a pane's requests to the remote kernel.
+// remoteEndpoint follows a pane's endpoint to wherever the link layer says it
+// is now. Base and RemoteID stay with the pane: they name the far runtime, and
+// a relaunched kernel is a different process until the pane re-opens on it.
+func (h *Hub) remoteEndpoint(rt *Runtime) func() RemoteEndpoint {
+	return func() RemoteEndpoint {
+		ep := rt.remote.ep
+		resolver, ok := h.opts.Remote.(RemoteResolver)
+		if !ok {
+			return ep
+		}
+		live, ok := resolver.Resolve(ep.Host, ep.Workspace)
+		if !ok || strings.TrimSpace(live.Addr) == "" {
+			return ep
+		}
+		ep.Addr, ep.Token = live.Addr, live.Token
+		return ep
+	}
+}
+
+// remoteProxy forwards a pane's requests to the endpoint it was opened on.
 func remoteProxy(ep RemoteEndpoint) http.Handler {
-	target := &url.URL{Scheme: "http", Host: ep.Addr, Path: ep.Base}
+	return remoteProxyAt(func() RemoteEndpoint { return ep })
+}
+
+// remoteProxyAt forwards a pane's requests to whatever endpoint is in force
+// when a request runs. A WSL kernel outlives the session that launched it and
+// exits only after its idle window, but a link that returns may still relaunch
+// it on a new port, so an address read once at pane creation would answer
+// nothing for the rest of the pane's life.
+func remoteProxyAt(current func() RemoteEndpoint) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
+			ep := current()
+			target := &url.URL{Scheme: "http", Host: ep.Addr, Path: ep.Base}
 			// SetURL appends the inbound path to the target's, so the pane's
 			// own runtime prefix on the far side rides here.
 			pr.SetURL(target)
@@ -434,7 +472,7 @@ func remoteProxy(ep RemoteEndpoint) http.Handler {
 			// tell "the link is down" from "the kernel refused" to say anything
 			// useful, and a bare status cannot carry which host went quiet.
 			refuse(w, http.StatusBadGateway, "remote.unreachable",
-				"the remote kernel is not answering", map[string]any{"host": ep.Host})
+				"the remote kernel is not answering", map[string]any{"host": current().Host})
 		},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

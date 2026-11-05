@@ -24,6 +24,11 @@ type ServeState struct {
 	BrokerFile bool   `json:"broker_file,omitempty"`
 	LogFile    string `json:"log_file,omitempty"`
 	StartedAt  int64  `json:"started_at,omitempty"` // unix seconds
+	// IdleTimeoutSeconds is the kernel's no-client exit window in whole
+	// seconds; -1 means it was asked to live until stopped. The zero value,
+	// omitted from JSON, is a record that predates the field or a launch that
+	// asked the kernel to exit as soon as no client is left.
+	IdleTimeoutSeconds int `json:"idle_timeout_seconds,omitempty"`
 }
 
 // MarshalState renders a ServeState as indented JSON.

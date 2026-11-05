@@ -15,6 +15,7 @@ import (
 	"reasonix/internal/state/sessionstore"
 	"strings"
 	"syscall"
+	"time"
 
 	"reasonix/internal/base/i18n"
 	"reasonix/internal/base/secrets"
@@ -58,6 +59,139 @@ type serveRunOptions struct {
 	openBrowser bool
 }
 
+// serveCommandFlags are the flags serve and web declare. They are grouped so
+// the command body reads as wiring rather than a wall of declarations.
+type serveCommandFlags struct {
+	model, profile, preset, agentComposition *string
+	maxSteps                                 *int
+	addr, resume, sessionID                  *string
+	auth, token, password                    *string
+	hashPassword, allowOpenNetwork           *bool
+	behindProxy                              *bool
+	publicURL, portFile, tokenFile, pidFile  *string
+	idleTimeout, page, dir                   *string
+	openBrowser, noOpen                      *bool
+	broker                                   brokerFlags
+}
+
+func registerServeCommandFlags(fs *flag.FlagSet, command string, openBrowser bool) serveCommandFlags {
+	authHelp := "auth mode: none, token, or password (default: config, else a generated token; none still requires the token for changes)"
+	if command == "web" {
+		authHelp = "auth mode: none, token, or password (default: generated token)"
+	}
+	f := serveCommandFlags{
+		model:            fs.String("model", "", "provider name (default: config default_model)"),
+		profile:          fs.String("profile", "", "deprecated: use --preset (economy|balanced|delivery)"),
+		preset:           fs.String("preset", "balanced", presetFlagUsage()),
+		agentComposition: fs.String("agent-composition", "", "Agent composition ID (builtin:, user: or project:)"),
+		maxSteps:         fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)"),
+		addr:             fs.String("addr", "127.0.0.1:8787", "listen address"),
+		resume:           fs.String("resume", "", "resume a saved session file"),
+		auth:             fs.String("auth", "", authHelp),
+		token:            fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)"),
+		password:         fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)"),
+		hashPassword:     fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit"),
+		allowOpenNetwork: fs.Bool("allow-open-network", false, "allow --auth none on an address other machines can reach (anyone on the network can then read sessions and history)"),
+		behindProxy:      fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy"),
+		publicURL:        fs.String("public-url", "", "the address a phone opens to reach this server, e.g. https://agent.example.com behind a TLS proxy; used for the share link and its QR code"),
+		portFile:         fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding"),
+		tokenFile:        fs.String("token-file", "", "read the auth=token pre-shared token from this file (overrides --token; keeps the secret out of argv)"),
+		pidFile:          fs.String("pid-file", "", "write the server process id to this file"),
+		idleTimeout:      fs.String("idle-timeout", "-1", "exit after this long with no request in flight (-1 = never, 0 = exit once no request is in flight, e.g. 15m)"),
+		page:             fs.String("page", "", "directory holding a built Studio page, served under /_studio/ (default: look beside the binary)"),
+		// The project this server works in; every other verb takes it from the
+		// shared run flags, and here it roots config, sandbox and file tools.
+		dir:         fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here"),
+		openBrowser: fs.Bool("open", openBrowser, "open the Web UI in the default browser"),
+		noOpen:      fs.Bool("no-open", false, "do not open the Web UI in the default browser"),
+	}
+	if command == "web" {
+		f.sessionID = fs.String("session-id", "", "bind a fresh Web session identity (used by /web handoff)")
+	} else {
+		f.sessionID = new(string)
+	}
+	f.broker = registerBrokerFlags(fs)
+	return f
+}
+
+// serveRunValues are what flag parsing settles before the server is built.
+type serveRunValues struct {
+	authExplicit  bool
+	workspaceRoot string
+	profile       string
+	idleTimeout   time.Duration
+}
+
+// parseServeCommandFlags parses args and rejects what can be refused before
+// anything starts. When ok is false, code is the exit status to return.
+func parseServeCommandFlags(fs *flag.FlagSet, f serveCommandFlags, args []string) (serveRunValues, int, bool) {
+	if code, ok := parseCommandFlags(fs, args); !ok {
+		return serveRunValues{}, code, false
+	}
+	var v serveRunValues
+	idleTimeout, err := parseIdleTimeout(*f.idleTimeout)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return serveRunValues{}, 2, false
+	}
+	v.idleTimeout = idleTimeout
+	fs.Visit(func(fl *flag.Flag) {
+		if fl.Name == "auth" {
+			v.authExplicit = true
+		}
+	})
+	if *f.resume != "" && *f.sessionID != "" {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--resume and --session-id cannot be used together")
+		return serveRunValues{}, 2, false
+	}
+	if *f.sessionID != "" {
+		if err := validateWebSessionID(*f.sessionID); err != nil {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+			return serveRunValues{}, 2, false
+		}
+	}
+	workspaceRoot, code := enterProjectDir(*f.dir)
+	if code != 0 {
+		return serveRunValues{}, code, false
+	}
+	v.workspaceRoot = workspaceRoot
+	profileRaw := strings.TrimSpace(*f.profile)
+	if profileRaw != "" {
+		warnProfileDeprecated()
+	} else {
+		profileRaw = strings.TrimSpace(*f.preset)
+	}
+	profile, err := parseRuntimeProfile(profileRaw)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return serveRunValues{}, 2, false
+	}
+	v.profile = profile
+	return v, 0, true
+}
+
+// claimServeSession takes the lease and loads the session a serve was asked to
+// resume. It reports false after writing the refusal, which is always exit 1.
+func claimServeSession(leases *control.SessionLeaseKeeper, resume string) (*sessionstore.Session, bool) {
+	if resume == "" {
+		return nil, true
+	}
+	if err := leases.Rebind(resume); err != nil {
+		if errors.Is(err, sessionstore.ErrSessionLeaseHeld) {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
+		} else {
+			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		}
+		return nil, false
+	}
+	resumeSession, err := loadResumableSession(resume)
+	if err != nil {
+		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
+		return nil, false
+	}
+	return resumeSession, true
+}
+
 type serveFrontendOptions struct {
 	command     string
 	address     string
@@ -76,6 +210,9 @@ type serveFrontendOptions struct {
 	// launchTokenPath names the file holding the launch token, so the
 	// terminal shows a path rather than the secret.
 	launchTokenPath string
+	// idleTimeout, when non-nil, exits the kernel after that long with no
+	// request in flight. Nil leaves the server running until signalled.
+	idleTimeout *time.Duration
 }
 
 type serveFrontendResources struct {
@@ -214,6 +351,15 @@ func startServeBalanceDiagnostics(ctrl *control.Controller) {
 func serveFrontendLoop(ctrl *control.Controller, srv serveHost, resources *serveFrontendResources, opts serveFrontendOptions) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	if opts.idleTimeout != nil {
+		// The hub owns the wrapper; the root cancel is the one this loop waits
+		// on, so idle exit drains exactly like a signal does.
+		if setter, ok := srv.(interface {
+			SetIdleTimeout(time.Duration, context.CancelFunc)
+		}); ok {
+			setter.SetIdleTimeout(*opts.idleTimeout, stop)
+		}
+	}
 	srv.StartRecoveryGC(ctx)
 	var serveErr error
 	if opts.openBrowser {
@@ -244,75 +390,12 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 		opts.command = "serve"
 	}
 	fs := flag.NewFlagSet(opts.command, flag.ContinueOnError)
-	model := fs.String("model", "", "provider name (default: config default_model)")
-	profileFlag := fs.String("profile", "", "deprecated: use --preset (economy|balanced|delivery)")
-	presetFlag := fs.String("preset", "balanced", presetFlagUsage())
-	agentComposition := fs.String("agent-composition", "", "Agent composition ID (builtin:, user: or project:)")
-	maxSteps := fs.Int("max-steps", 0, "one-off max tool-call rounds (0 = automatic)")
-	addr := fs.String("addr", "127.0.0.1:8787", "listen address")
-	resume := fs.String("resume", "", "resume a saved session file")
-	sessionID := new(string)
-	if opts.command == "web" {
-		sessionID = fs.String("session-id", "", "bind a fresh Web session identity (used by /web handoff)")
-	}
-	authHelp := "auth mode: none, token, or password (default: config, else a generated token; none still requires the token for changes)"
-	if opts.command == "web" {
-		authHelp = "auth mode: none, token, or password (default: generated token)"
-	}
-	auth := fs.String("auth", "", authHelp)
-	token := fs.String("token", "", "pre-shared token for auth=token (auto-generated if empty)")
-	password := fs.String("password", "", "password for auth=password (use --hash-password to store a hash instead)")
-	hashPassword := fs.Bool("hash-password", false, "print a bcrypt hash of --password and exit")
-	allowOpenNetwork := fs.Bool("allow-open-network", false, "allow --auth none on an address other machines can reach (anyone on the network can then read sessions and history)")
-	behindProxy := fs.Bool("behind-proxy", false, "trust X-Forwarded-For / X-Forwarded-Proto headers from a reverse proxy")
-	publicURL := fs.String("public-url", "", "the address a phone opens to reach this server, e.g. https://agent.example.com behind a TLS proxy; used for the share link and its QR code")
-	portFile := fs.String("port-file", "", "write the actual bound listen address (host:port) to this file after binding")
-	tokenFile := fs.String("token-file", "", "read the auth=token pre-shared token from this file (overrides --token; keeps the secret out of argv)")
-	pidFile := fs.String("pid-file", "", "write the server process id to this file")
-	page := fs.String("page", "", "directory holding a built Studio page, served under /_studio/ (default: look beside the binary)")
-	// The project this server works in. Every other verb takes it from the
-	// shared run flags; serve did not, and without it the only way to name a
-	// project was the process working directory.
-	dir := fs.String("dir", "", "change to this directory first (project root); config, sandbox and file tools resolve from here")
-	broker := registerBrokerFlags(fs)
-	openBrowser := fs.Bool("open", opts.openBrowser, "open the Web UI in the default browser")
-	noOpen := fs.Bool("no-open", false, "do not open the Web UI in the default browser")
-	if code, ok := parseCommandFlags(fs, args); !ok {
+	flags := registerServeCommandFlags(fs, opts.command, opts.openBrowser)
+	values, code, ok := parseServeCommandFlags(fs, flags, args)
+	if !ok {
 		return code
 	}
-	authExplicit := false
-	fs.Visit(func(f *flag.Flag) {
-		if f.Name == "auth" {
-			authExplicit = true
-		}
-	})
-	if *resume != "" && *sessionID != "" {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, "--resume and --session-id cannot be used together")
-		return 2
-	}
-	if *sessionID != "" {
-		if err := validateWebSessionID(*sessionID); err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 2
-		}
-	}
-	workspaceRoot, code := enterProjectDir(*dir)
-	if code != 0 {
-		return code
-	}
-	profileRaw := strings.TrimSpace(*profileFlag)
-	if profileRaw != "" {
-		warnProfileDeprecated()
-	} else {
-		profileRaw = strings.TrimSpace(*presetFlag)
-	}
-	profile, err := parseRuntimeProfile(profileRaw)
-	if err != nil {
-		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-		return 2
-	}
-
-	if code, done := printPasswordHash(*hashPassword, *password); done {
+	if code, done := printPasswordHash(*flags.hashPassword, *flags.password); done {
 		return code
 	}
 
@@ -330,14 +413,14 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	})
 
 	// Build serve config, merging CLI flags over config file.
-	serveCfg, code := serveConfigFromFlags(opts.command, authExplicit, cfg.Serve, serveFlagValues{
-		auth: *auth, token: *token, tokenFile: *tokenFile,
-		password: *password, behindProxy: *behindProxy,
+	serveCfg, code := serveConfigFromFlags(opts.command, values.authExplicit, cfg.Serve, serveFlagValues{
+		auth: *flags.auth, token: *flags.token, tokenFile: *flags.tokenFile,
+		password: *flags.password, behindProxy: *flags.behindProxy,
 	})
 	if code != 0 {
 		return code
 	}
-	if err := serve.OpenBindRefusal(serveCfg, *addr, *allowOpenNetwork); err != nil {
+	if err := serve.OpenBindRefusal(serveCfg, *flags.addr, *flags.allowOpenNetwork); err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
@@ -347,42 +430,29 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	// through the same keeper. Released after the controller closes.
 	leases := control.NewSessionLeaseKeeper()
 	defer leases.Release()
-	var resumeSession *sessionstore.Session
-	if *resume != "" {
-		if err := leases.Rebind(*resume); err != nil {
-			if errors.Is(err, sessionstore.ErrSessionLeaseHeld) {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, control.SessionInUseMessage(err)+"; "+control.SessionLeaseCloseHint)
-			} else {
-				fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			}
-			return 1
-		}
-		var err error
-		resumeSession, err = loadResumableSession(*resume)
-		if err != nil {
-			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
-			return 1
-		}
+	resumeSession, ok := claimServeSession(leases, *flags.resume)
+	if !ok {
+		return 1
 	}
 	// A bootstrapped serve resolves providers over the tunnel back to the
 	// machine that started it, so this host needs no key and no egress of its
 	// own. Unset leaves boot on its ordinary config-backed path.
-	providerResolver, err := broker.resolver()
+	providerResolver, err := flags.broker.resolver()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 		return 2
 	}
-	*model = serveStartModel(*model, *resume, cfg, providerResolver != nil)
+	*flags.model = serveStartModel(*flags.model, *flags.resume, cfg, providerResolver != nil)
 	// Keep the browser reachable when the selected provider has no saved key.
 	// The loopback-only provider setup surface stores the missing credential and
 	// rebuilds this controller in place before the normal web UI is exposed.
 	paneSink := reporter.Wrap(bc)
-	ctrl, err := setupProfileWithOverrides(ctx, *model, *maxSteps, false, paneSink, profile, cliBuildOverrides{
-		AgentComposition: freshCompositionName(*agentComposition, resumeSession), Composition: resumedComposition(resumeSession),
+	ctrl, err := setupProfileWithOverrides(ctx, *flags.model, *flags.maxSteps, false, paneSink, values.profile, cliBuildOverrides{
+		AgentComposition: freshCompositionName(*flags.agentComposition, resumeSession), Composition: resumedComposition(resumeSession),
 		NativeSurfaces: true,
 		// The project named on the command line, empty when there was none: boot
 		// then falls back to the working directory exactly as before.
-		WorkspaceRoot: workspaceRoot,
+		WorkspaceRoot: values.workspaceRoot,
 		Version:       opts.version, OnSessionRecovered: cliSessionRecoveredHandler(leases),
 		ProviderResolver: providerResolver,
 	})
@@ -393,10 +463,10 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	defer ctrl.Close()
 	SetTaskJobKiller(ctrlKillerAdapter{ctrl})
 
-	if *resume != "" {
-		_ = ctrl.Resume(resumeSession, *resume)
-	} else if *sessionID != "" {
-		freshPath, err := freshWebSessionPath(ctrl.SessionDir(), *sessionID)
+	if *flags.resume != "" {
+		_ = ctrl.Resume(resumeSession, *flags.resume)
+	} else if *flags.sessionID != "" {
+		freshPath, err := freshWebSessionPath(ctrl.SessionDir(), *flags.sessionID)
 		if err != nil {
 			fmt.Fprintln(os.Stderr, i18n.M.ErrorPrefix, err)
 			return 1
@@ -413,15 +483,38 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 
 	// A hub, so this frontend drives several sessions at once the way the studio
 	// window does. The session this command was started for is the first pane.
-	hub := serve.NewHub(serve.HubOptions{Serve: serveCfg, NativeSurfaces: true, DecorateSink: reporter.Wrap, ProviderResolver: providerResolver, Page: pageOrWarn(*page)})
+	hub := serve.NewHub(serve.HubOptions{Serve: serveCfg, NativeSurfaces: true, DecorateSink: reporter.Wrap, ProviderResolver: providerResolver, Page: pageOrWarn(*flags.page)})
 	adoptFirstPane(hub, ctrl, bc, paneSink, serveCfg, leases)
+	var idleExit *time.Duration
+	if values.idleTimeout >= 0 {
+		idleExit = &values.idleTimeout
+	}
 	return runServeFrontend(ctrl, hub, serveCfg, serveFrontendOptions{
-		command: opts.command, address: *addr,
-		portFile: *portFile, tokenFile: *tokenFile, pidFile: *pidFile,
-		openBrowser: *openBrowser && !*noOpen, brokered: providerResolver != nil,
-		hasSession: *resume != "" || *sessionID != "",
-		publicURL:  *publicURL,
+		command: opts.command, address: *flags.addr,
+		portFile: *flags.portFile, tokenFile: *flags.tokenFile, pidFile: *flags.pidFile,
+		openBrowser: *flags.openBrowser && !*flags.noOpen, brokered: providerResolver != nil,
+		hasSession:  *flags.resume != "" || *flags.sessionID != "",
+		publicURL:   *flags.publicURL,
+		idleTimeout: idleExit,
 	})
+}
+
+// parseIdleTimeout reads --idle-timeout. The bare -1 is the "never" sentinel
+// rather than a negative duration, so it is handled before the duration
+// parser; every other value must be a non-negative Go duration.
+func parseIdleTimeout(raw string) (time.Duration, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" || raw == "-1" {
+		return -1, nil
+	}
+	d, err := time.ParseDuration(raw)
+	if err != nil {
+		return 0, fmt.Errorf("invalid --idle-timeout %q: %v", raw, err)
+	}
+	if d < 0 {
+		return 0, fmt.Errorf("invalid --idle-timeout %q: must be -1 (never), 0, or a positive duration", raw)
+	}
+	return d, nil
 }
 
 // applyServePassword settles password auth before anything is served: a
