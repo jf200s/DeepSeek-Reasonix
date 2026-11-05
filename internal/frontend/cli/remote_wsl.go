@@ -73,7 +73,7 @@ func remoteWSLAddCLI(args []string) int {
 	fs := newFlagSet("remote wsl add")
 	workspace := fs.String("workspace", "", "default folder inside the distribution")
 	install := fs.String("serve-install", "auto", "kernel install strategy: auto|npm|upload|never")
-	idleTimeout := fs.Int("idle-timeout", config.DefaultRemoteIdleTimeoutMinutes, "minutes a kernel may sit idle before it exits (0 = at once, -1 = never)")
+	idleTimeout := fs.Int("idle-timeout", config.DefaultRemoteIdleTimeoutMinutes, "minutes a kernel may sit idle before it exits (1..1440, -1 = never)")
 	if code, ok := parseCommandFlags(fs, args[2:]); !ok {
 		return code
 	}

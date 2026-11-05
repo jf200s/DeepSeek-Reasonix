@@ -141,9 +141,13 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 	}
 	workspace := resolveWorkspace(target, opts.Workspace, home)
 	paths := target.Paths(home, workspace)
+	// The idle policy is part of what a connect asks for. A recorded kernel
+	// launched under another one is replaced rather than reused, so a config
+	// change takes effect on the next connect without a manual stop.
+	idleSeconds := idleTimeoutSeconds(opts.IdleTimeout)
 
 	// 2. Reuse a live process if the recorded pid is still running.
-	st, tok, ok, err := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, false, opts.clock(), workspace)
+	st, tok, ok, err := tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, idleSeconds, false, opts.clock(), workspace)
 	if err != nil {
 		return Result{}, err
 	}
@@ -169,7 +173,7 @@ func EnsureServe(ctx context.Context, conn Conn, opts Options) (Result, error) {
 		return Result{}, err
 	}
 	defer lock.release()
-	st, tok, ok, err = tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, true, opts.clock(), workspace)
+	st, tok, ok, err = tryReuse(ctx, conn, target, fs, paths, opts.MinVersion, opts.Broker, idleSeconds, true, opts.clock(), workspace)
 	if err != nil {
 		return Result{}, err
 	}
@@ -371,7 +375,7 @@ func Logs(ctx context.Context, conn Conn, workspace string, n int, w io.Writer) 
 // tryReuse decides what a recorded (or published) serve means for this connect.
 // ok reuses it; neither ok nor err declines it, and the caller replaces it. A
 // non-nil err is a live serve that must be neither reused nor replaced.
-func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.Files, paths StatePaths, minVersion string, broker Broker, held bool, clock func() time.Time, workspace ...string) (ServeState, string, bool, error) {
+func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.Files, paths StatePaths, minVersion string, broker Broker, idleSeconds int, held bool, clock func() time.Time, workspace ...string) (ServeState, string, bool, error) {
 	st, err := readState(ctx, fs, paths.StateJSON)
 	if err == nil && !recordIsLive(ctx, conn, target, paths, st) {
 		err = errors.New("bootstrap: recorded serve is not running")
@@ -383,6 +387,13 @@ func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.Files, 
 		var found bool
 		if st, found, err = adoptPublished(ctx, conn, target, fs, paths, workspace[0], minVersion, held, clock); err != nil || !found {
 			return ServeState{}, "", false, err
+		}
+		// A serve adopted from published files left no record of the idle
+		// policy it was started with. This connect's request is what its record
+		// carries from now on, so a later connect can compare against it.
+		st.IdleTimeoutSeconds = idleSeconds
+		if data, mErr := MarshalState(st); mErr == nil {
+			_ = fs.WriteFileAtomic(ctx, paths.StateJSON, data, 0o600)
 		}
 	}
 	if len(workspace) > 0 && st.Workspace != workspace[0] {
@@ -412,6 +423,12 @@ func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.Files, 
 	tok, err := readToken(ctx, fs, paths.TokenFile)
 	if err != nil {
 		return ServeState{}, "", false, fmt.Errorf("%w: pid %d has no readable token file", ErrServeNotAttachable, st.PID)
+	}
+	// The idle policy was fixed on the launch command line, so a kernel asked
+	// for another one cannot be told: it is replaced. A record that predates
+	// the field carries zero and is treated the same way.
+	if st.IdleTimeoutSeconds != idleSeconds {
+		return ServeState{}, "", false, nil
 	}
 	if follows {
 		// Written on every reuse, not only when the address moved: a broker

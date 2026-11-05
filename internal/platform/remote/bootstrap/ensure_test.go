@@ -167,7 +167,7 @@ func TestEnsureServeReusesLiveProcess(t *testing.T) {
 	if err := os.MkdirAll(paths.Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	st := ServeState{PID: 777, Addr: "127.0.0.1:5000", Workspace: root, TokenFile: paths.TokenFile}
+	st := ServeState{PID: 777, Addr: "127.0.0.1:5000", Workspace: root, TokenFile: paths.TokenFile, IdleTimeoutSeconds: idleTimeoutSeconds(nil)}
 	data, _ := MarshalState(st)
 	if err := os.WriteFile(paths.StateJSON, data, 0o600); err != nil {
 		t.Fatal(err)
@@ -468,6 +468,7 @@ func TestEnsureServeReusesAServeOnTheSameBroker(t *testing.T) {
 	st := ServeState{
 		PID: 778, Addr: "127.0.0.1:5001", Workspace: root,
 		TokenFile: paths.TokenFile, Broker: "127.0.0.1:40001",
+		IdleTimeoutSeconds: idleTimeoutSeconds(nil),
 	}
 	data, _ := MarshalState(st)
 	if err := os.WriteFile(paths.StateJSON, data, 0o600); err != nil {
@@ -619,6 +620,7 @@ func TestEnsureServeRebindsAServeThatFollowsItsBrokerFile(t *testing.T) {
 			st := ServeState{
 				PID: 779, Addr: "127.0.0.1:5002", Workspace: root,
 				TokenFile: paths.TokenFile, Broker: "127.0.0.1:40001", BrokerFile: true,
+				IdleTimeoutSeconds: idleTimeoutSeconds(nil),
 			}
 			data, _ := MarshalState(st)
 			for path, body := range map[string][]byte{

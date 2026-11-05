@@ -4,11 +4,13 @@ import (
 	"context"
 	"errors"
 	"maps"
+	"os"
 	"slices"
 	"strings"
 	"testing"
 	"time"
 
+	"reasonix/internal/base/testenv"
 	"reasonix/internal/platform/remote"
 	"reasonix/internal/platform/remote/sftpfs"
 )
@@ -507,4 +509,110 @@ func allFlagsYes() string {
 		b.WriteString("flag " + f + " yes\n")
 	}
 	return b.String()
+}
+
+// ensureIdleFixture pre-writes a live serve record with recorded as its idle
+// policy, and returns a fake machine that launches at most one replacement.
+func ensureIdleFixture(t *testing.T, recorded int) (*fakeConn, StatePaths, *int) {
+	t.Helper()
+	skipOnWindows(t)
+	root := testenv.TempDir(t)
+	paths := pathsFor(root, root)
+	if err := os.MkdirAll(paths.Dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	data, err := MarshalState(ServeState{
+		PID: 777, Addr: "127.0.0.1:5000", Workspace: root,
+		TokenFile: paths.TokenFile, IdleTimeoutSeconds: recorded,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.StateJSON, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(paths.TokenFile, []byte("existing-token\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	launches := new(int)
+	conn := newFakeConn(t, root, func(cmd string) (remote.ExecResult, error) {
+		switch {
+		case strings.Contains(cmd, "kill -0 777"), strings.Contains(cmd, "ps -p 777"):
+			return ok("1\n")
+		case strings.Contains(cmd, "uname"):
+			return ok("Linux x86_64\n")
+		case strings.Contains(cmd, "command -v reasonix"):
+			return ok("bin /usr/bin/reasonix\nver reasonix v9.9.0\n" + allFlagsYes())
+		case strings.Contains(cmd, "nohup"):
+			*launches++
+			_ = os.WriteFile(paths.PortFile, []byte("127.0.0.1:6004\n"), 0o600)
+			return ok("999\n")
+		case strings.Contains(cmd, "ps -p 999"):
+			return ok("1\n")
+		}
+		return ok("")
+	})
+	return conn, paths, launches
+}
+
+// A kernel's idle policy is fixed on its launch command line, so a connect
+// asking for another window cannot reuse it: the kernel is replaced in place
+// and the new record says what it was launched with. A record that predates
+// the field carries zero, which no request asks for, and is replaced the same
+// way.
+func TestEnsureServeReplacesAKernelLaunchedWithAnotherIdleTimeout(t *testing.T) {
+	tenMinutes := 10 * time.Minute
+	never := -time.Minute
+	for _, tc := range []struct {
+		name     string
+		recorded int
+		request  *time.Duration
+		want     int
+	}{
+		{"ten minutes to never", idleTimeoutSeconds(&tenMinutes), &never, -1},
+		{"never to ten minutes", -1, &tenMinutes, 600},
+		{"missing field is not reused", 0, &tenMinutes, 600},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			conn, paths, launches := ensureIdleFixture(t, tc.recorded)
+			res, err := EnsureServe(context.Background(), conn, Options{
+				Workspace: "~", MinVersion: "1.0.0", IdleTimeout: tc.request,
+			})
+			if err != nil {
+				t.Fatalf("EnsureServe: %v", err)
+			}
+			if res.Reused {
+				t.Fatalf("a kernel launched with %ds idle was reused for %v", tc.recorded, *tc.request)
+			}
+			if *launches != 1 {
+				t.Fatalf("launched %d time(s), want 1", *launches)
+			}
+			if res.State.IdleTimeoutSeconds != tc.want {
+				t.Fatalf("result idle = %d, want %d", res.State.IdleTimeoutSeconds, tc.want)
+			}
+			rec, err := readStateFile(paths.StateJSON)
+			if err != nil || rec.IdleTimeoutSeconds != tc.want || rec.PID != 999 {
+				t.Fatalf("recorded state = %+v, %v; want pid 999 with idle %d", rec, err, tc.want)
+			}
+		})
+	}
+}
+
+// The comparison must not turn every connect into a relaunch: the same request
+// still reuses the running kernel.
+func TestEnsureServeReusesAKernelLaunchedWithTheSameIdleTimeout(t *testing.T) {
+	never := -time.Minute
+	conn, _, launches := ensureIdleFixture(t, idleTimeoutSeconds(&never))
+	res, err := EnsureServe(context.Background(), conn, Options{
+		Workspace: "~", MinVersion: "1.0.0", IdleTimeout: &never,
+	})
+	if err != nil {
+		t.Fatalf("EnsureServe: %v", err)
+	}
+	if !res.Reused || res.State.PID != 777 {
+		t.Fatalf("res = %+v, want the recorded kernel reused", res)
+	}
+	if *launches != 0 {
+		t.Fatalf("reused connect launched %d kernel(s)", *launches)
+	}
 }

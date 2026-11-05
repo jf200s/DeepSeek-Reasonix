@@ -295,7 +295,7 @@ func TestReusePerformsNoCapture(t *testing.T) {
 	if err := os.MkdirAll(paths.Dir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	data, _ := MarshalState(ServeState{PID: 777, Addr: "127.0.0.1:5000", Workspace: root, TokenFile: paths.TokenFile})
+	data, _ := MarshalState(ServeState{PID: 777, Addr: "127.0.0.1:5000", Workspace: root, TokenFile: paths.TokenFile, IdleTimeoutSeconds: idleTimeoutSeconds(nil)})
 	if err := os.WriteFile(paths.StateJSON, data, 0o600); err != nil {
 		t.Fatal(err)
 	}

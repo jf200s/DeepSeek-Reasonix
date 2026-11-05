@@ -351,15 +351,7 @@ func startServeBalanceDiagnostics(ctrl *control.Controller) {
 func serveFrontendLoop(ctrl *control.Controller, srv serveHost, resources *serveFrontendResources, opts serveFrontendOptions) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	if opts.idleTimeout != nil {
-		// The hub owns the wrapper; the root cancel is the one this loop waits
-		// on, so idle exit drains exactly like a signal does.
-		if setter, ok := srv.(interface {
-			SetIdleTimeout(time.Duration, context.CancelFunc)
-		}); ok {
-			setter.SetIdleTimeout(*opts.idleTimeout, stop)
-		}
-	}
+	armIdleExit(srv, opts.idleTimeout, stop)
 	srv.StartRecoveryGC(ctx)
 	var serveErr error
 	if opts.openBrowser {
@@ -485,18 +477,37 @@ func runServeWithOptions(args []string, opts serveRunOptions) int {
 	// window does. The session this command was started for is the first pane.
 	hub := serve.NewHub(serve.HubOptions{Serve: serveCfg, NativeSurfaces: true, DecorateSink: reporter.Wrap, ProviderResolver: providerResolver, Page: pageOrWarn(*flags.page)})
 	adoptFirstPane(hub, ctrl, bc, paneSink, serveCfg, leases)
-	var idleExit *time.Duration
-	if values.idleTimeout >= 0 {
-		idleExit = &values.idleTimeout
-	}
 	return runServeFrontend(ctrl, hub, serveCfg, serveFrontendOptions{
 		command: opts.command, address: *flags.addr,
 		portFile: *flags.portFile, tokenFile: *flags.tokenFile, pidFile: *flags.pidFile,
 		openBrowser: *flags.openBrowser && !*flags.noOpen, brokered: providerResolver != nil,
 		hasSession:  *flags.resume != "" || *flags.sessionID != "",
 		publicURL:   *flags.publicURL,
-		idleTimeout: idleExit,
+		idleTimeout: idleExitFromFlag(values.idleTimeout),
 	})
+}
+
+// idleExitFromFlag turns the parsed --idle-timeout into what the hub arms. The
+// -1 sentinel means "never", which is no idle exit at all, so it arms nothing;
+// zero and positive durations are real windows.
+func idleExitFromFlag(d time.Duration) *time.Duration {
+	if d < 0 {
+		return nil
+	}
+	return &d
+}
+
+// armIdleExit hands the window to a hub that can self-exit. The root cancel is
+// the one the serve loop waits on, so idle exit drains exactly like a signal.
+func armIdleExit(srv serveHost, idleTimeout *time.Duration, stop context.CancelFunc) {
+	if idleTimeout == nil {
+		return
+	}
+	if setter, ok := srv.(interface {
+		SetIdleTimeout(time.Duration, context.CancelFunc)
+	}); ok {
+		setter.SetIdleTimeout(*idleTimeout, stop)
+	}
 }
 
 // parseIdleTimeout reads --idle-timeout. The bare -1 is the "never" sentinel

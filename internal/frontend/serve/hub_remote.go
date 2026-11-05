@@ -56,6 +56,10 @@ func (ep RemoteEndpoint) validate() error {
 // remote" is one question with one answer.
 type remoteBinding struct {
 	ep RemoteEndpoint
+	// resolver is the link layer this endpoint came from, kept with the pane so
+	// a call made while the hub no longer holds the runtime—retiring it on
+	// close—can still ask where its kernel moved to.
+	resolver RemoteResolver
 	// release drops this pane's hold on the connection its endpoint rides.
 	// Several panes share one, so the last one out closes it, not the first.
 	release func()
@@ -95,6 +99,13 @@ type RemoteAttacher interface {
 // the endpoint it was opened on.
 type RemoteResolver interface {
 	Resolve(host, workspace string) (RemoteEndpoint, bool)
+}
+
+// RemoteEnsurer is a resolver that can also bring a kernel back before a
+// request is proxied to it. The check is per request and deliberately cheap;
+// the caller falls back to the last snapshot when it answers nothing.
+type RemoteEnsurer interface {
+	EnsureEndpoint(ctx context.Context, host, workspace string) (RemoteEndpoint, bool)
 }
 
 // RemoteProbe is one machine's readiness. Ready says a route to a kernel
@@ -361,10 +372,11 @@ func (h *Hub) OpenRemote(ep RemoteEndpoint, release func()) (*Runtime, error) {
 		return nil, err
 	}
 	rt := &Runtime{
-		ID:     h.nextID(),
-		Root:   ep.Workspace,
-		remote: &remoteBinding{ep: ep, release: release},
+		ID:   h.nextID(),
+		Root: ep.Workspace,
 	}
+	resolver, _ := h.opts.Remote.(RemoteResolver)
+	rt.remote = &remoteBinding{ep: ep, resolver: resolver, release: release}
 	return rt, h.publish(rt)
 }
 
@@ -382,14 +394,23 @@ func (rt *Runtime) Remote() (RemoteEndpoint, bool) {
 // machine. Best effort: the link may already be down, and a pane that cannot
 // be closed locally is worse than one that leaked a runtime remotely.
 func (rt *Runtime) closeFarRuntime() {
-	id := rt.remote.ep.RemoteID
+	ep := rt.remote.ep
+	id := ep.RemoteID
 	if id == "" {
 		return
 	}
+	// The pane may have outlived the address it was opened on. Resolve is a
+	// read-only snapshot: a relaunched kernel answers elsewhere, and this call
+	// must not start a kernel on a machine being closed.
+	if rt.remote.resolver != nil {
+		if live, ok := rt.remote.resolver.Resolve(ep.Host, ep.Workspace); ok && strings.TrimSpace(live.Addr) != "" {
+			ep.Addr, ep.Token = live.Addr, live.Token
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), farCloseTimeout)
 	defer cancel()
-	if err := farCall(ctx, rt.remote.ep, "/runtimes/"+url.PathEscape(id)+"/close", nil, nil); err != nil {
-		slog.Warn("serve: retire remote runtime", "host", rt.remote.ep.Host, "id", id, "err", err)
+	if err := farCall(ctx, ep, "/runtimes/"+url.PathEscape(id)+"/close", nil, nil); err != nil {
+		slog.Warn("serve: retire remote runtime", "host", ep.Host, "id", id, "err", err)
 	}
 }
 
@@ -421,11 +442,18 @@ func remoteBaseName(p string) string {
 }
 
 // remoteEndpoint follows a pane's endpoint to wherever the link layer says it
-// is now. Base and RemoteID stay with the pane: they name the far runtime, and
-// a relaunched kernel is a different process until the pane re-opens on it.
-func (h *Hub) remoteEndpoint(rt *Runtime) func() RemoteEndpoint {
-	return func() RemoteEndpoint {
+// is now, asking the link to bring the kernel back first when it has gone. Base
+// and RemoteID stay with the pane: they name the far runtime, and a relaunched
+// kernel is a different process until the pane re-opens on it.
+func (h *Hub) remoteEndpoint(rt *Runtime) func(context.Context) RemoteEndpoint {
+	return func(ctx context.Context) RemoteEndpoint {
 		ep := rt.remote.ep
+		if ensurer, ok := h.opts.Remote.(RemoteEnsurer); ok {
+			if live, ok := ensurer.EnsureEndpoint(ctx, ep.Host, ep.Workspace); ok && strings.TrimSpace(live.Addr) != "" {
+				ep.Addr, ep.Token = live.Addr, live.Token
+				return ep
+			}
+		}
 		resolver, ok := h.opts.Remote.(RemoteResolver)
 		if !ok {
 			return ep
@@ -441,18 +469,26 @@ func (h *Hub) remoteEndpoint(rt *Runtime) func() RemoteEndpoint {
 
 // remoteProxy forwards a pane's requests to the endpoint it was opened on.
 func remoteProxy(ep RemoteEndpoint) http.Handler {
-	return remoteProxyAt(func() RemoteEndpoint { return ep })
+	return remoteProxyAt(func(context.Context) RemoteEndpoint { return ep })
 }
 
-// remoteProxyAt forwards a pane's requests to whatever endpoint is in force
-// when a request runs. A WSL kernel outlives the session that launched it and
-// exits only after its idle window, but a link that returns may still relaunch
-// it on a new port, so an address read once at pane creation would answer
-// nothing for the rest of the pane's life.
-func remoteProxyAt(current func() RemoteEndpoint) http.Handler {
+// remoteEndpointKey carries the endpoint one request resolved, so the rewrite
+// and the error handler speak about the same kernel.
+type remoteEndpointKey struct{}
+
+func remoteEndpointOf(ctx context.Context) RemoteEndpoint {
+	ep, _ := ctx.Value(remoteEndpointKey{}).(RemoteEndpoint)
+	return ep
+}
+
+// remoteProxyAt forwards a pane's requests to the endpoint in force when the
+// request runs; a relaunched kernel answers on a new port. One request resolves
+// one endpoint, and a failure after it was sent is reported, never replayed: a
+// POST cannot be sent twice without doing its work twice.
+func remoteProxyAt(current func(context.Context) RemoteEndpoint) http.Handler {
 	proxy := &httputil.ReverseProxy{
 		Rewrite: func(pr *httputil.ProxyRequest) {
-			ep := current()
+			ep := remoteEndpointOf(pr.In.Context())
 			target := &url.URL{Scheme: "http", Host: ep.Addr, Path: ep.Base}
 			// SetURL appends the inbound path to the target's, so the pane's
 			// own runtime prefix on the far side rides here.
@@ -467,12 +503,12 @@ func remoteProxyAt(current func() RemoteEndpoint) http.Handler {
 		// length would sit in the buffer — and a turn's output is worth more
 		// than the syscalls saved on the occasional download.
 		FlushInterval: -1,
-		ErrorHandler: func(w http.ResponseWriter, _ *http.Request, _ error) {
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, _ error) {
 			// A dotted code, not a proxy's default 502 page: the frontend has to
 			// tell "the link is down" from "the kernel refused" to say anything
 			// useful, and a bare status cannot carry which host went quiet.
 			refuse(w, http.StatusBadGateway, "remote.unreachable",
-				"the remote kernel is not answering", map[string]any{"host": current().Host})
+				"the remote kernel is not answering", map[string]any{"host": remoteEndpointOf(r.Context()).Host})
 		},
 	}
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -480,6 +516,7 @@ func remoteProxyAt(current func() RemoteEndpoint) http.Handler {
 			refuseAgentPresetEdit(w)
 			return
 		}
-		proxy.ServeHTTP(w, r)
+		ctx := context.WithValue(r.Context(), remoteEndpointKey{}, current(r.Context()))
+		proxy.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

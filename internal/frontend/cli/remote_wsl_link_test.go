@@ -88,3 +88,72 @@ func TestTestingAndConnectingAWSLMachineNeverDialsSSH(t *testing.T) {
 		t.Fatalf("remote connect = %d, started = %v", code, link.started)
 	}
 }
+
+// The SSH-shaped read commands have no WSL answer: status probes an SSH
+// connection and forward ls lists rules that only an SSH dial applies. A host
+// in the book under kind=wsl must be refused instead of printed as an empty
+// SSH entry.
+func TestWSLHostIsRefusedBySSHOnlyRemoteCommands(t *testing.T) {
+	isolateCLIConfigHome(t)
+	if code := remoteWSLCLI([]string{"add", "dev", "Ubuntu"}); code != 0 {
+		t.Fatalf("wsl add = %d", code)
+	}
+	for name, run := range map[string]func() int{
+		"status":     func() int { return remoteStatusCLI([]string{"dev"}) },
+		"forward ls": func() int { return remoteForwardCLI([]string{"ls", "dev"}) },
+	} {
+		var code int
+		stderr := captureStderr(t, func() { code = run() })
+		if code != 1 {
+			t.Fatalf("%s = %d, want 1", name, code)
+		}
+		if !strings.Contains(stderr, remote.ErrNotSSHHost.Error()) {
+			t.Fatalf("%s stderr = %q, want %q", name, stderr, remote.ErrNotSSHHost)
+		}
+	}
+}
+
+// The SSH client's flags describe a hop, persisted forwards and a tunnel a WSL
+// distribution does not have. Accepting them silently would promise work the
+// connect never does.
+func TestWSLConnectRefusesSSHOnlyFlags(t *testing.T) {
+	isolateCLIConfigHome(t)
+	if code := remoteWSLCLI([]string{"add", "dev", "Ubuntu"}); code != 0 {
+		t.Fatalf("wsl add = %d", code)
+	}
+	for _, args := range [][]string{
+		{"connect", "dev", "--no-serve"},
+		{"open", "dev", "--no-serve"},
+		{"connect", "dev", "--forward-only"},
+		{"connect", "dev", "--local-port", "7777"},
+		{"connect", "--local-port=0", "dev"},
+	} {
+		var code int
+		stderr := captureStderr(t, func() { code = remoteConnectCLI(args, "test") })
+		if code != 1 {
+			t.Fatalf("%v = %d, want 1; stderr=%q", args, code, stderr)
+		}
+		if !strings.Contains(stderr, "only apply to ssh hosts") {
+			t.Fatalf("%v stderr = %q, want the ssh-only refusal", args, stderr)
+		}
+	}
+}
+
+// Zero is not a writable idle timeout: -1 is how a host says "never" and a
+// positive value is a real window. Both add forms refuse it with the range.
+func TestAddingAHostRefusesZeroIdleTimeout(t *testing.T) {
+	isolateCLIConfigHome(t)
+	for name, run := range map[string]func() int{
+		"ssh add": func() int { return remoteAddCLI([]string{"box", "dev@10.0.0.9", "--idle-timeout", "0"}) },
+		"wsl add": func() int { return remoteWSLCLI([]string{"add", "dev", "Ubuntu", "--idle-timeout", "0"}) },
+	} {
+		var code int
+		stderr := captureStderr(t, func() { code = run() })
+		if code != 1 {
+			t.Fatalf("%s with --idle-timeout 0 = %d, want 1", name, code)
+		}
+		if !strings.Contains(stderr, "-1") || !strings.Contains(stderr, "1..1440") {
+			t.Fatalf("%s stderr = %q, want the writable range named", name, stderr)
+		}
+	}
+}

@@ -24,15 +24,20 @@ import (
 
 var portFileArg = regexp.MustCompile(`--port-file '([^']*)'`)
 
+var psPID = regexp.MustCompile(`ps -p (\d+)`)
+
 // machine is a host to attach to: a real SSH server with SFTP and forwarding,
-// and an HTTP server standing in for the serve the bootstrap thinks it started.
+// and HTTP servers standing in for the serves the bootstrap thinks it started.
+// Each launch gets its own server, so closing one models a kernel that stopped
+// answering while its link stayed up.
 type machine struct {
-	home   string
-	kernel *httptest.Server
-	dial   func(host string, prompts Prompts) (*remote.Client, error)
+	home    string
+	kernels []*httptest.Server
+	dial    func(host string, prompts Prompts) (*remote.Client, error)
 
 	mu       sync.Mutex
 	launched int
+	pid      int
 }
 
 func fakeMachine(t *testing.T) *machine {
@@ -41,10 +46,13 @@ func fakeMachine(t *testing.T) *machine {
 		t.Skip("the bootstrap harness models a POSIX remote; exercised on Linux/macOS")
 	}
 	m := &machine{home: testenv.TempDir(t)}
-	m.kernel = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintf(w, "remote kernel: %s", r.URL.Path)
-	}))
-	t.Cleanup(m.kernel.Close)
+	for range 4 {
+		k := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			fmt.Fprintf(w, "remote kernel: %s", r.URL.Path)
+		}))
+		m.kernels = append(m.kernels, k)
+		t.Cleanup(k.Close)
+	}
 
 	srv := sshtest.Start(t, sshtest.Options{
 		Password: "pw",
@@ -60,15 +68,25 @@ func fakeMachine(t *testing.T) *machine {
 			case strings.Contains(cmd, "nohup"):
 				// Stand in for serve coming up: publish the address of the HTTP
 				// server the forward will actually reach.
-				if hit := portFileArg.FindStringSubmatch(cmd); hit != nil {
-					_ = os.WriteFile(hit[1], []byte(m.kernel.Listener.Addr().String()+"\n"), 0o600)
-				}
 				m.mu.Lock()
 				m.launched++
+				m.pid = 54320 + m.launched
+				kernel := m.kernels[m.launched-1]
+				pid := m.pid
 				m.mu.Unlock()
-				return "54321\n", "", 0
+				if hit := portFileArg.FindStringSubmatch(cmd); hit != nil {
+					_ = os.WriteFile(hit[1], []byte(kernel.Listener.Addr().String()+"\n"), 0o600)
+				}
+				return fmt.Sprintf("%d\n", pid), "", 0
 			case strings.Contains(cmd, "ps -p"):
-				return "1\n", "", 0
+				hit := psPID.FindStringSubmatch(cmd)
+				m.mu.Lock()
+				alive := hit != nil && hit[1] == fmt.Sprint(m.pid)
+				m.mu.Unlock()
+				if alive {
+					return "1\n", "", 0
+				}
+				return "0\n", "", 0
 			}
 			return "", "", 0
 		},
@@ -97,6 +115,26 @@ func (m *machine) launches() int {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.launched
+}
+
+// kill ends the current kernel without touching the link: the SSH connection
+// outlives the serve, so the next request is what discovers the kernel is gone.
+func (m *machine) kill() {
+	m.mu.Lock()
+	kernel := m.kernels[m.launched-1]
+	m.pid = 0
+	m.mu.Unlock()
+	kernel.Close()
+}
+
+// writeRemoteHostConfig records a host book entry so the pool reads a policy
+// for "box" from configuration, the way a real host would have one.
+func writeRemoteHostConfig(t *testing.T, home string, idleMinutes int) {
+	t.Helper()
+	body := fmt.Sprintf("[remote]\n[[remote.hosts]]\nname = \"box\"\nhost = \"10.0.0.1\"\nidle_timeout_minutes = %d\n", idleMinutes)
+	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o644); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func testPool(t *testing.T, m *machine) *Pool {
@@ -399,4 +437,95 @@ func kernelFlagsYes() string {
 		b.WriteString("flag " + f + " yes\n")
 	}
 	return b.String()
+}
+
+// A kernel that stops answering is brought back by the request path. The link
+// can still be Connected — an SSH connection outlives the serve it reached — so
+// the only evidence is the endpoint not answering.
+func TestEnsureEndpointRelaunchesAKernelThatStoppedAnswering(t *testing.T) {
+	m := fakeMachine(t)
+	p := testPool(t, m)
+	ws := m.workspace(t, "proj")
+	first := mustAttach(t, p, "box", ws)
+	defer first.Release()
+
+	m.kill()
+	// A liveness answer is trusted for ensureProbeTTL; let the window pass so
+	// this request is the one that discovers the kernel is gone.
+	time.Sleep(ensureProbeTTL + 100*time.Millisecond)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	live, ok := p.EnsureEndpoint(ctx, "box", ws)
+	if !ok {
+		t.Fatal("EnsureEndpoint found nothing after the kernel died")
+	}
+	if live.Addr == first.Addr {
+		t.Fatalf("EnsureEndpoint kept the dead endpoint %s", live.Addr)
+	}
+	resp, err := http.Get("http://" + live.Addr + "/status")
+	if err != nil {
+		t.Fatalf("call the replaced kernel: %v", err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("replaced kernel answered %d", resp.StatusCode)
+	}
+	if n := m.launches(); n != 2 {
+		t.Fatalf("launched %d time(s) after the kernel died, want 2", n)
+	}
+
+	// A second attach goes through the same check, finds the repaired kernel,
+	// and must not start a third.
+	again := mustAttach(t, p, "box", ws)
+	defer again.Release()
+	if again.Addr != live.Addr || again.Token != live.Token {
+		t.Fatalf("second attach = %s, want the repaired endpoint %s", again.Addr, live.Addr)
+	}
+	if n := m.launches(); n != 2 {
+		t.Fatalf("second attach launched again (%d launches)", n)
+	}
+}
+
+// A pane opened earlier keeps calling the same workspace after the host's idle
+// policy is edited. The next attach must replace the kernel rather than hand
+// back one launched under the old policy.
+func TestSecondAttachReplacesTheKernelWhenTheHostIdlePolicyChanged(t *testing.T) {
+	m := fakeMachine(t)
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	writeRemoteHostConfig(t, home, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	p := NewPool(ctx, Options{Dial: m.dial})
+	t.Cleanup(p.Close)
+
+	ws := m.workspace(t, "proj")
+	first := mustAttach(t, p, "box", ws)
+	defer first.Release()
+	if n := m.launches(); n != 1 {
+		t.Fatalf("first attach launched %d time(s)", n)
+	}
+
+	writeRemoteHostConfig(t, home, -1)
+	second := mustAttach(t, p, "box", ws)
+	defer second.Release()
+	if second.Addr == first.Addr {
+		t.Fatalf("the kernel launched with the old idle policy was reused at %s", second.Addr)
+	}
+	if n := m.launches(); n != 2 {
+		t.Fatalf("launched %d time(s) for the changed policy, want 2", n)
+	}
+
+	p.mu.Lock()
+	client := p.links["box"].client
+	p.mu.Unlock()
+	st, alive, err := bootstrap.Status(ctx, client, second.Workspace)
+	if err != nil {
+		t.Fatalf("read the replaced kernel's state: %v", err)
+	}
+	if !alive || st.IdleTimeoutSeconds != -1 {
+		t.Fatalf("state = %+v alive=%v, want the -1 policy the edit asked for", st, alive)
+	}
 }
