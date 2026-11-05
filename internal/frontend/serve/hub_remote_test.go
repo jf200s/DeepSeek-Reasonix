@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -704,6 +705,51 @@ func TestClosingARemotePaneRetiresTheFarRuntime(t *testing.T) {
 	}
 	if n := len(far.List()); n != 0 {
 		t.Fatalf("the far hub still holds %d runtimes after the pane closed", n)
+	}
+}
+
+// A pane can outlive the address it was opened on. Closing it has to ask the
+// link where its workspace answers now; retiring the far runtime at the old
+// address reaches a kernel that may not exist and leaks the one that does.
+func TestClosingARemotePaneRetiresTheRuntimeOnTheResolvedKernel(t *testing.T) {
+	t.Setenv("REASONIX_HOME", testenv.TempDir(t))
+	var liveClose, staleClose atomic.Int32
+	live := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/runtimes/far-1/close" {
+			http.NotFound(w, r)
+			return
+		}
+		liveClose.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer live.Close()
+	stale := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		staleClose.Add(1)
+		http.Error(w, "not here", http.StatusBadGateway)
+	}))
+	defer stale.Close()
+
+	att := &movingAttacher{}
+	att.move(live.Listener.Addr().String())
+	h := NewHub(HubOptions{Remote: att})
+	rt, err := h.OpenRemote(RemoteEndpoint{
+		Host:      "gpu-box",
+		Workspace: "/srv/data/training",
+		Addr:      stale.Listener.Addr().String(),
+		Token:     "remote-secret",
+		RemoteID:  "far-1",
+	}, func() {})
+	if err != nil {
+		t.Fatalf("open remote: %v", err)
+	}
+	if err := h.Close(rt.ID); err != nil {
+		t.Fatalf("close: %v", err)
+	}
+	if got := liveClose.Load(); got != 1 {
+		t.Fatalf("the resolved kernel got %d close calls, want 1", got)
+	}
+	if got := staleClose.Load(); got != 0 {
+		t.Fatalf("the stale address got %d close calls, want 0", got)
 	}
 }
 

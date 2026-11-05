@@ -24,9 +24,7 @@ type ServeState struct {
 	BrokerFile bool   `json:"broker_file,omitempty"`
 	LogFile    string `json:"log_file,omitempty"`
 	StartedAt  int64  `json:"started_at,omitempty"` // unix seconds
-	// IdleTimeoutSeconds is the kernel's no-client exit window in whole
-	// seconds; -1 means it was asked to live until stopped. Zero, omitted from
-	// JSON, is a record that predates the field, never a requested policy.
+	// IdleTimeoutSeconds: -1 means until stopped; 0 is omitted from JSON and read as pre-field.
 	IdleTimeoutSeconds int `json:"idle_timeout_seconds,omitempty"`
 }
 

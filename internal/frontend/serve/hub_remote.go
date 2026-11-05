@@ -56,9 +56,7 @@ func (ep RemoteEndpoint) validate() error {
 // remote" is one question with one answer.
 type remoteBinding struct {
 	ep RemoteEndpoint
-	// resolver is the link layer this endpoint came from, kept with the pane so
-	// a call made while the hub no longer holds the runtime—retiring it on
-	// close—can still ask where its kernel moved to.
+	// resolver is the link layer this endpoint came from, so close can follow a moved kernel.
 	resolver RemoteResolver
 	// release drops this pane's hold on the connection its endpoint rides.
 	// Several panes share one, so the last one out closes it, not the first.

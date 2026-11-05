@@ -38,6 +38,8 @@ type machine struct {
 	mu       sync.Mutex
 	launched int
 	pid      int
+	// locateFlags overrides the remote's launch-flag answers; empty means all supported.
+	locateFlags string
 }
 
 func fakeMachine(t *testing.T) *machine {
@@ -64,7 +66,13 @@ func fakeMachine(t *testing.T) *machine {
 			case strings.Contains(cmd, "command -v reasonix"):
 				// LocateCommand's three lines: a path, a fresh version, and the
 				// --port-file flag the launch needs.
-				return "bin /usr/bin/reasonix\nver reasonix v9.9.0\n" + kernelFlagsYes(), "", 0
+				m.mu.Lock()
+				flags := m.locateFlags
+				m.mu.Unlock()
+				if flags == "" {
+					flags = kernelFlagsYes()
+				}
+				return "bin /usr/bin/reasonix\nver reasonix v9.9.0\n" + flags, "", 0
 			case strings.Contains(cmd, "nohup"):
 				// Stand in for serve coming up: publish the address of the HTTP
 				// server the forward will actually reach.
@@ -127,11 +135,24 @@ func (m *machine) kill() {
 	kernel.Close()
 }
 
+// withoutIdleFlag makes the remote kernel look like one that predates
+// --idle-timeout, so a launch requiring it cannot use that binary.
+func (m *machine) withoutIdleFlag() {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.locateFlags = strings.ReplaceAll(kernelFlagsYes(), "flag idle-timeout yes", "flag idle-timeout no")
+}
+
 // writeRemoteHostConfig records a host book entry so the pool reads a policy
 // for "box" from configuration, the way a real host would have one.
 func writeRemoteHostConfig(t *testing.T, home string, idleMinutes int) {
 	t.Helper()
-	body := fmt.Sprintf("[remote]\n[[remote.hosts]]\nname = \"box\"\nhost = \"10.0.0.1\"\nidle_timeout_minutes = %d\n", idleMinutes)
+	writeRemoteHostPolicy(t, home, idleMinutes, "auto")
+}
+
+func writeRemoteHostPolicy(t *testing.T, home string, idleMinutes int, install string) {
+	t.Helper()
+	body := fmt.Sprintf("[remote]\n[[remote.hosts]]\nname = \"box\"\nhost = \"10.0.0.1\"\nidle_timeout_minutes = %d\nserve_install = %q\n", idleMinutes, install)
 	if err := os.WriteFile(filepath.Join(home, "config.toml"), []byte(body), 0o644); err != nil {
 		t.Fatal(err)
 	}
@@ -527,5 +548,117 @@ func TestSecondAttachReplacesTheKernelWhenTheHostIdlePolicyChanged(t *testing.T)
 	}
 	if !alive || st.IdleTimeoutSeconds != -1 {
 		t.Fatalf("state = %+v alive=%v, want the -1 policy the edit asked for", st, alive)
+	}
+}
+
+// A replacement that fails has not applied the edit. The old kernel is still
+// running, and the next attach has to try the edit again instead of reading
+// the link's prematurely committed policy as unchanged and silently reuse it.
+func TestAFailedPolicyReplacementIsRetriedOnTheNextAttach(t *testing.T) {
+	m := fakeMachine(t)
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	writeRemoteHostPolicy(t, home, 10, "auto")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	p := NewPool(ctx, Options{Dial: m.dial})
+	t.Cleanup(p.Close)
+
+	ws := m.workspace(t, "proj")
+	first := mustAttach(t, p, "box", ws)
+	defer first.Release()
+
+	// The edited policy needs a --idle-timeout flag the remote binary lacks,
+	// and install is disabled, so the replacement cannot happen.
+	writeRemoteHostPolicy(t, home, -1, "never")
+	m.withoutIdleFlag()
+
+	if _, err := p.Attach(context.Background(), "box", ws, Call{}); err == nil {
+		t.Fatal("the replacement succeeded with a kernel that cannot take the policy")
+	}
+	if n := m.launches(); n != 1 {
+		t.Fatalf("launched %d time(s) for the failed replacement, want 1", n)
+	}
+
+	// The first pane still holds this workspace, so the same space is reused.
+	if _, err := p.Attach(context.Background(), "box", ws, Call{}); err == nil {
+		t.Fatal("the next attach reused the kernel the failed edit could not replace")
+	}
+	if n := m.launches(); n != 1 {
+		t.Fatalf("the retry launched %d time(s), want 1", n)
+	}
+}
+
+// A workspace opened for the first time is also an attach: it uses the host's
+// policy as it stands now, not the one read when the link was dialed.
+func TestANewWorkspaceUsesTheEditedHostPolicy(t *testing.T) {
+	m := fakeMachine(t)
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	writeRemoteHostConfig(t, home, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	p := NewPool(ctx, Options{Dial: m.dial})
+	t.Cleanup(p.Close)
+
+	first := mustAttach(t, p, "box", m.workspace(t, "one"))
+	defer first.Release()
+	writeRemoteHostConfig(t, home, -1)
+	second := mustAttach(t, p, "box", m.workspace(t, "two"))
+	defer second.Release()
+
+	p.mu.Lock()
+	client := p.links["box"].client
+	p.mu.Unlock()
+	st, alive, err := bootstrap.Status(ctx, client, second.Workspace)
+	if err != nil {
+		t.Fatalf("read the new workspace's state: %v", err)
+	}
+	if !alive || st.IdleTimeoutSeconds != -1 {
+		t.Fatalf("state = %+v alive=%v, want the edited -1 policy", st, alive)
+	}
+}
+
+// A kernel relaunched from the request path is another attach opportunity:
+// it too has to pick up a config edit made after the link was dialed.
+func TestARelaunchedKernelUsesTheEditedHostPolicy(t *testing.T) {
+	m := fakeMachine(t)
+	home := testenv.TempDir(t)
+	t.Setenv("REASONIX_HOME", home)
+	writeRemoteHostConfig(t, home, 10)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	p := NewPool(ctx, Options{Dial: m.dial})
+	t.Cleanup(p.Close)
+
+	ws := m.workspace(t, "proj")
+	first := mustAttach(t, p, "box", ws)
+	defer first.Release()
+
+	writeRemoteHostConfig(t, home, -1)
+	m.kill()
+	// A liveness answer is trusted for ensureProbeTTL; let it lapse so this
+	// request discovers the kernel is gone.
+	time.Sleep(ensureProbeTTL + 100*time.Millisecond)
+
+	live, ok := p.EnsureEndpoint(context.Background(), "box", ws)
+	if !ok || live.Addr == "" {
+		t.Fatal("EnsureEndpoint did not relaunch the kernel")
+	}
+	if n := m.launches(); n != 2 {
+		t.Fatalf("launched %d time(s), want the relaunched kernel", n)
+	}
+	p.mu.Lock()
+	client := p.links["box"].client
+	p.mu.Unlock()
+	st, alive, err := bootstrap.Status(ctx, client, live.Workspace)
+	if err != nil {
+		t.Fatalf("read the relaunched kernel's state: %v", err)
+	}
+	if !alive || st.IdleTimeoutSeconds != -1 {
+		t.Fatalf("state = %+v alive=%v, want the edited -1 policy", st, alive)
 	}
 }

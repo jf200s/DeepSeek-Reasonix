@@ -11,10 +11,10 @@ import (
 
 // adoptPublished finds a live serve that published this workspace's port and
 // pid files without leaving a record — started by hand or by a client that
-// never wrote one — and records it, so it is attached rather than raced. found
-// is false when nothing live is published. A live serve that cannot be driven
-// from here is an error: its files are not this connect's to clear.
-func adoptPublished(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.Files, paths StatePaths, workspace, minVersion string, held bool, clock func() time.Time) (ServeState, bool, error) {
+// never wrote one — and records it, so it is attached rather than raced. A
+// record found under the lock belongs to that serve and is returned as is;
+// only a record this call creates carries idleSeconds, under the same lock.
+func adoptPublished(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.Files, paths StatePaths, workspace, minVersion string, idleSeconds int, held bool, clock func() time.Time) (ServeState, bool, error) {
 	pid, err := readPIDFile(ctx, fs, paths.PidFile)
 	if err != nil || !pidIsServe(ctx, conn, target, pid, paths) {
 		return ServeState{}, false, nil
@@ -46,6 +46,7 @@ func adoptPublished(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.F
 	st := ServeState{
 		PID: pid, Addr: addr, Workspace: workspace, Version: version,
 		TokenFile: paths.TokenFile, StartedAt: nowUnix(clock),
+		IdleTimeoutSeconds: idleSeconds,
 	}
 	if data, err := MarshalState(st); err == nil {
 		_ = fs.WriteFileAtomic(ctx, paths.StateJSON, data, 0o600)

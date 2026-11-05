@@ -33,9 +33,11 @@ const remoteTokenCookie = "reasonix_token"
 // endpoint to use.
 var errKernelUnavailable = errors.New("attach: the remote kernel is not answering")
 
-// probeEndpoint asks a forwarded kernel whether it is still there. Any HTTP
-// answer below 500 proves the listener and its forward, and the token cookie
-// keeps an unrelated process on a recycled port from passing as the kernel.
+// probeEndpoint asks a forwarded kernel whether it is still there. Only its
+// own /status answer proves that: the token cookie has to match, so a 401 or
+// 403 means some other kernel (or an unrelated process) holds the port, and a
+// 404 means it is not a kernel with this route at all. Both are dead ends that
+// ask for a relaunch, not evidence of the kernel this pane was opened on.
 func probeEndpoint(ctx context.Context, addr, token string) bool {
 	if strings.TrimSpace(addr) == "" {
 		return false
@@ -53,7 +55,7 @@ func probeEndpoint(ctx context.Context, addr, token string) bool {
 	}
 	defer resp.Body.Close()
 	_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
-	return resp.StatusCode < http.StatusInternalServerError
+	return resp.StatusCode == http.StatusOK
 }
 
 // EnsureEndpoint reports where a workspace answers now, bringing its kernel
@@ -107,10 +109,10 @@ func (p *Pool) ensureAttach(ctx context.Context, l *link, s *space, call Call) e
 	if s.err != nil {
 		return s.err
 	}
-	if p.refreshHostPolicy(l) {
+	if install, idle, moved, ok := p.refreshHostPolicy(l); ok && moved {
 		s.ensure.Lock()
 		defer s.ensure.Unlock()
-		return p.launch(ctx, l, s, s.key, call)
+		return p.launchWithPolicy(ctx, l, s, s.key, call, install, idle)
 	}
 	return p.ensureSpace(ctx, l, s)
 }
@@ -144,7 +146,15 @@ func (p *Pool) ensureSpace(ctx context.Context, l *link, s *space) error {
 	if alive {
 		return nil
 	}
-	if err := p.launch(ctx, l, s, s.key, Call{}); err != nil {
+	// A relaunch is the next attach as far as a pane is concerned: read the
+	// host's policy again rather than revive the kernel on the one dial saw.
+	var err error
+	if install, idle, _, ok := p.refreshHostPolicy(l); ok {
+		err = p.launchWithPolicy(ctx, l, s, s.key, Call{}, install, idle)
+	} else {
+		err = p.launch(ctx, l, s, s.key, Call{})
+	}
+	if err != nil {
 		p.record(l, func(st *HostState) { st.Err = err.Error() })
 		return err
 	}
@@ -152,30 +162,40 @@ func (p *Pool) ensureSpace(ctx context.Context, l *link, s *space) error {
 	return nil
 }
 
-// refreshHostPolicy re-reads the host entry and reports whether its install
-// strategy or idle timeout moved since the link was dialed, so a config edit is
-// visible on the next attach without restarting the app.
-func (p *Pool) refreshHostPolicy(l *link) bool {
+// refreshHostPolicy re-reads the host entry and reports its install strategy,
+// idle timeout, whether either moved since the link was dialed, and whether the
+// entry was readable at all. It does not commit the reading: a launch that
+// fails must leave the applied policy in place so the next attach retries the
+// edit instead of reusing the kernel it could not replace.
+func (p *Pool) refreshHostPolicy(l *link) (install string, idle *time.Duration, moved, ok bool) {
 	cfg, err := config.Load()
 	if err != nil {
-		return false
+		return "", nil, false, false
 	}
 	entry, ok := cfg.RemoteHost(l.host)
 	if !ok {
-		return false
+		return "", nil, false, false
 	}
-	install := entry.ServeInstallMode()
-	idle := entry.IdleTimeout(cfg.Remote.IdleTimeoutMinutes)
+	install = entry.ServeInstallMode()
+	read := entry.IdleTimeout(cfg.Remote.IdleTimeoutMinutes)
+	idle = &read
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	moved := install != l.install || l.idleTimeout == nil || *l.idleTimeout != idle
-	l.install, l.idleTimeout = install, &idle
-	return moved
+	moved = install != l.install || l.idleTimeout == nil || *l.idleTimeout != read
+	return install, idle, moved, true
 }
 
-// hostPolicy reads what a launch should use. The policy moves when a later
-// attach re-reads the host entry, so it is read under the pool's lock rather
-// than straight off the link.
+// commitHostPolicy records the policy a successful launch used, so a later
+// relaunch or attach compares against what the running kernel actually got.
+func (p *Pool) commitHostPolicy(l *link, install string, idle *time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	l.install, l.idleTimeout = install, idle
+}
+
+// hostPolicy reads what a launch should use. A successful launch commits the
+// policy it used, so it is read under the pool's lock rather than straight off
+// the link.
 func (p *Pool) hostPolicy(l *link) (install string, idle *time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()

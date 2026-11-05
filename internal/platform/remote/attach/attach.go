@@ -135,8 +135,7 @@ type link struct {
 	// beside the policy below. A host set to resolve its own gets no broker
 	// forward.
 	provider string
-	// install and idleTimeout are the host's current policy, read at dial and
-	// refreshed by a later attach; p.mu guards both once the link is ready.
+	// install and idleTimeout are the host's policy, read at dial and refreshed on attach.
 	install     string
 	idleTimeout *time.Duration
 	refs        int
@@ -342,20 +341,16 @@ func (p *Pool) record(l *link, apply func(*HostState)) {
 
 type space struct {
 	gate
-	// key is what spaces is keyed by — what the caller asked for. The remote
-	// kernel resolves ~ and answers with an absolute path, so the two part ways
-	// and deleting by the resolved one would leave the entry behind.
+	// key is what spaces is keyed by: the caller's spelling, before ~ is resolved.
 	key       string
 	workspace string
 	addr      string
 	token     string
 	forward   string
 	refs      int
-	// ensure serialises a liveness check and the relaunch that may follow, so
-	// a burst of requests for one workspace pays for one probe and one kernel.
+	// ensure serialises a liveness check and the relaunch that may follow.
 	ensure sync.Mutex
-	// probedAt and probedOK are the last liveness answer; a short window keeps
-	// a busy pane from probing the kernel on every request.
+	// probedAt and probedOK cache the last liveness answer for ensureProbeTTL.
 	probedAt time.Time
 	probedOK bool
 }
@@ -564,7 +559,15 @@ func (p *Pool) holdSpace(l *link, workspace string) (*space, bool) {
 // reaches it, and opens the gate every other caller on this space waits on.
 func (p *Pool) serve(ctx context.Context, l *link, s *space, workspace string, call Call) {
 	defer close(s.ready)
-	if err := p.launch(ctx, l, s, workspace, call); err != nil {
+	// Opening a workspace is an attach like any other: use the host's policy as
+	// it stands now, not only the one the link was dialed with.
+	var err error
+	if install, idle, _, ok := p.refreshHostPolicy(l); ok {
+		err = p.launchWithPolicy(ctx, l, s, workspace, call, install, idle)
+	} else {
+		err = p.launch(ctx, l, s, workspace, call)
+	}
+	if err != nil {
 		s.err = err
 		p.forgetSpace(l, s)
 		return
@@ -573,10 +576,18 @@ func (p *Pool) serve(ctx context.Context, l *link, s *space, workspace string, c
 }
 
 // launch makes sure a kernel is running for workspace and points the space at
-// it. It is the one body a first attach and a post-reconnect relaunch share:
-// both have to map the folder, ask for a kernel, and publish the forward that
-// reaches the one they got.
+// it, using the policy the link committed. It is the one body a first attach
+// and a post-reconnect relaunch share.
 func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, call Call) error {
+	install, idleTimeout := p.hostPolicy(l)
+	return p.launchWithPolicy(ctx, l, s, workspace, call, install, idleTimeout)
+}
+
+// launchWithPolicy is launch with an explicit policy, used when a config edit
+// supplied one that is not committed until the launch succeeds. A failed
+// launch leaves the link on the old policy, so the next attach retries the
+// edit rather than silently keeping the kernel it could not replace.
+func (p *Pool) launchWithPolicy(ctx context.Context, l *link, s *space, workspace string, call Call, install string, idleTimeout *time.Duration) error {
 	if m, ok := l.client.(workspaceMapper); ok {
 		mapped, err := m.Workspace(ctx, workspace)
 		if err != nil {
@@ -584,7 +595,9 @@ func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, 
 		}
 		workspace = mapped
 	}
-	install, idleTimeout := p.hostPolicy(l)
+	// The committed policy is the host's entry; a forced install override
+	// affects this launch only.
+	configuredInstall := install
 	if p.opts.Install != "" {
 		install = p.opts.Install
 	}
@@ -644,6 +657,9 @@ func (p *Pool) launch(ctx context.Context, l *link, s *space, workspace string, 
 	// The launch itself proved the kernel is there, so the next request does
 	// not probe the process it just started.
 	s.probedAt, s.probedOK = time.Now(), true
+	// Only now is the policy what the running kernel was actually launched
+	// with; until this point a failure has to leave the old one for a retry.
+	p.commitHostPolicy(l, configuredInstall, idleTimeout)
 	return nil
 }
 

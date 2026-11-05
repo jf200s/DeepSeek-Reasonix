@@ -53,7 +53,9 @@ const DefaultIdleTimeout = 10 * time.Minute
 
 // idleTimeoutSeconds is what a serve state record reports for this launch:
 // whole seconds, -1 when the kernel was asked to live until stopped, or 0 when
-// it was asked to exit as soon as no client is connected.
+// it was asked to exit as soon as no client is connected. Validated host config
+// never asks for zero; a direct serve flag or an in-memory caller can, and its
+// omitted record then reads as pre-field on the next connect.
 func idleTimeoutSeconds(d *time.Duration) int {
 	v := DefaultIdleTimeout
 	if d != nil {

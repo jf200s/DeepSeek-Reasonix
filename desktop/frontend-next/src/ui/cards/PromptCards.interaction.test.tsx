@@ -363,20 +363,23 @@ describe("decision cards", () => {
     expect(fullAccess).toHaveBeenCalledWith("row");
   });
 
-  it("hands the full-access confirmation back when the switch is refused", async () => {
+  it("re-enables the full-access confirmation when the switch is not confirmed", async () => {
     const item = {
       t: "approval", id: "row", a: {
         id: "gate", tool: "bash", subject: "python - <<'PY'", reasonCode: "dynamic_bash", allowsSession: true,
       },
     } as Extract<Item, { t: "approval" }>;
-    const failed = vi.fn();
-    const fullAccess = vi.fn(async () => { failed(new Error("kernel refused")); });
+    // A refused switch reaches the card as an undefined outcome: the gate
+    // consumes the error and re-reads the projection, so there is no rejected
+    // promise for this card to handle.
+    const fullAccess = vi.fn().mockResolvedValue(undefined);
     render(<ApprovalCard item={item} onApprove={vi.fn(pending)} onFullAccess={fullAccess} onPlan={vi.fn(pending)} />);
 
     await userEvent.click(screen.getByRole("button", { name: "切换全部放行…" }));
     await userEvent.click(screen.getByRole("button", { name: "确认全部放行" }));
     await waitFor(() => expect((screen.getByRole("button", { name: "确认全部放行" }) as HTMLButtonElement).disabled).toBe(false));
     expect(screen.queryByRole("alert")).toBeNull();
-    expect(failed).toHaveBeenCalledTimes(1);
+    expect(fullAccess).toHaveBeenCalledTimes(1);
+    expect(fullAccess).toHaveBeenCalledWith("row");
   });
 });

@@ -385,15 +385,8 @@ func tryReuse(ctx context.Context, conn Conn, target remoteOS, fs sftpfs.Files, 
 			return ServeState{}, "", false, nil
 		}
 		var found bool
-		if st, found, err = adoptPublished(ctx, conn, target, fs, paths, workspace[0], minVersion, held, clock); err != nil || !found {
+		if st, found, err = adoptPublished(ctx, conn, target, fs, paths, workspace[0], minVersion, idleSeconds, held, clock); err != nil || !found {
 			return ServeState{}, "", false, err
-		}
-		// A serve adopted from published files left no record of the idle
-		// policy it was started with. This connect's request is what its record
-		// carries from now on, so a later connect can compare against it.
-		st.IdleTimeoutSeconds = idleSeconds
-		if data, mErr := MarshalState(st); mErr == nil {
-			_ = fs.WriteFileAtomic(ctx, paths.StateJSON, data, 0o600)
 		}
 	}
 	if len(workspace) > 0 && st.Workspace != workspace[0] {

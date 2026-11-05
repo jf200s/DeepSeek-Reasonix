@@ -393,9 +393,7 @@ type Registry struct {
 	// schema. Nil means every registered tool is provider-visible (tests and
 	// legacy direct construction).
 	providerVisible map[string]bool
-	// providerSurface records how providerVisible was set. Only the
-	// authoritative mode is inherited by delegated children, which intersect
-	// their own tools with it; see ProviderSurfaceMode.
+	// providerSurface records how providerVisible was set; only authoritative is inherited.
 	providerSurface ProviderSurfaceMode
 	// admit, when non-nil, is the ceiling on what this registry may ever hold:
 	// Add refuses every tool it rejects, so no later registration path can widen it.
